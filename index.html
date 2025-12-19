@@ -1,0 +1,2383 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz Player (IndexedDB & Reward System)</title>
+    
+    <!-- CSS Framework -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script> <!-- ADDED: Confetti -->
+    
+    <!-- KaTeX & DOMPurify -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+    
+    <style>
+        :root {
+            --primary-bg: #f4f6f9;
+            --secondary-bg: #ffffff;
+            --text-color: #212529;
+            --primary-color: #007bff;
+            --secondary-color: #6c757d;
+            --success-color: #28a745;
+            --danger-color: #dc3545;
+            --warning-color: #ffc107;
+            --info-color: #17a2b8;
+            --border-radius: 8px;
+            --box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background-color: var(--primary-bg);
+            color: var(--text-color);
+            margin: 0;
+            padding: 15px;
+            transition: box-shadow 0.2s; /* For Border Effect */
+            min-height: 100vh;
+        }
+
+        /* --- REWARD SYSTEM STYLES --- */
+        .border-correct {
+            box-shadow: inset 0 0 60px rgba(40, 167, 69, 0.6) !important;
+            transition: box-shadow 0.1s ease-out;
+        }
+
+        .border-wrong {
+            box-shadow: inset 0 0 60px rgba(220, 53, 69, 0.6) !important;
+            animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+
+        .rainbow-text {
+            background: linear-gradient(to right, #d32f2f, #f57c00, #fbc02d, #388e3c, #1976d2, #7b1fa2);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            animation: rainbow_anim 1s linear infinite;
+            font-weight: 900 !important;
+        }
+        @keyframes rainbow_anim { to { background-position: 200% center; } }
+
+        #reward-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; /* Click through */
+            z-index: 1500; /* Above most things, below floating bar/modals if needed */
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+
+        #reward-status-text {
+            font-size: 3rem; font-weight: 800; text-transform: uppercase;
+            text-align: center; text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            opacity: 0; transform: scale(0.5);
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            padding: 10px 20px; background: rgba(255,255,255,0.8);
+            border-radius: 15px; backdrop-filter: blur(2px);
+        }
+        #reward-status-text.show { opacity: 1; transform: scale(1); }
+
+        #reward-badge {
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            padding: 8px 25px; border-radius: 30px;
+            background: #fff; border: 2px solid #ddd;
+            font-weight: bold; font-size: 1.2rem; color: #555;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            z-index: 1501; opacity: 0; transition: opacity 0.3s;
+        }
+        #reward-badge.show { opacity: 1; }
+        /* --------------------------- */
+
+        .container {
+            max-width: 800px;
+            margin: auto;
+            background-color: var(--secondary-bg);
+            padding: 20px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            overflow-y: auto;
+            max-height: 95vh;
+            transition: padding-bottom 0.3s;
+            position: relative; z-index: 10; /* Ensure container is above body background */
+        }
+        .container.pb-safe {
+            padding-bottom: 100px !important;
+        }
+
+        .screen { display: none; }
+        .screen.active { display: block; }
+        
+        h1, h2, h3 { text-align: center; color: var(--primary-color); }
+        
+        .button-group { display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 20px; }
+        .btn {
+            padding: 12px; font-size: 16px; font-weight: bold; color: white;
+            background-color: var(--primary-color); border: none; border-radius: var(--border-radius);
+            cursor: pointer; text-align: center; transition: background-color 0.2s, transform 0.1s;
+        }
+        .btn:active { transform: translateY(2px); }
+        .btn:hover { background-color: #0056b3; }
+        .btn-secondary { background-color: var(--secondary-color); }
+        .btn-secondary:hover { background-color: #5a6268; }
+        .btn-danger { background-color: var(--danger-color); }
+        .btn-danger:hover { background-color: #c82333; }
+        .btn-warning { background-color: var(--warning-color); }
+        .btn-warning:hover { background-color: #e0a800; }
+        .btn-success { background-color: var(--success-color); }
+        .btn-success:hover { background-color: #218838; }
+        
+        /* Sidebar Styles */
+        .sidebar { width: 260px; max-height: 80vh; overflow-y: auto; position: fixed; top: 0; left: 0; height: 100%; background-color: var(--secondary-bg); box-shadow: var(--box-shadow); transition: transform 0.3s ease; z-index: 900; }
+        .pill-container { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; }
+        .main-content { transition: all 0.3s ease; padding: 15px; }
+        .with-sidebar { margin-left: 260px; width: calc(100% - 260px); }
+        .full { margin-left: 0; width: 100%; }
+        
+        /* Modal Styles */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); z-index: 1000; }
+        .modal-content { background-color: var(--secondary-bg); margin: 5% auto; padding: 20px; border-radius: var(--border-radius); width: 95%; max-width: 800px; max-height: 90vh; overflow-y: auto; box-shadow: var(--box-shadow); position: relative; }
+        #statisticsModal .modal-content { max-width: 500px; }
+        .modal-content.large-search-open { margin-top: 0.5%; padding-top: 150px; }
+        
+        /* Comparison Styles */
+        .comparison-question { margin-bottom: 25px; padding-bottom: 15px; border-bottom: 2px solid #ccc; }
+        .comparison-question:last-of-type { border-bottom: none; }
+        .comparison-question-text { margin-bottom: 15px; white-space: pre-wrap; }
+        .options-comparison-wrapper { display: flex; flex-direction: row; gap: 15px; }
+        .options-column { flex: 1; min-width: 48%; border: 1px solid #e0e0e0; border-radius: var(--border-radius); padding: 10px; background-color: #fdfdfd; }
+        .options-column h5 { margin-top: 0; text-align: center; border-bottom: 1px solid #eee; padding-bottom: 5px; margin-bottom: 10px; font-size: 16px; }
+        .option-item { padding: 4px; margin: 3px 0; border-radius: 4px; }
+        
+        /* Search & Floating Menu Styles */
+        #comparison-menu-btn { position: fixed; top: 20px; right: 20px; width: 40px; height: 40px; background-color: var(--primary-color); border-radius: 50%; cursor: pointer; z-index: 2102; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+        #comparison-menu-btn .bar { width: 20px; height: 2px; background-color: white; transition: all 0.3s; }
+        .search-menu { background-color: #fff; box-shadow: 0 5px 15px rgba(0,0,0,0.2); z-index: 2101; box-sizing: border-box; position: absolute; }
+        .search-menu h4 { margin-top: 0; color: var(--primary-color); }
+        .search-menu .input-group { margin-bottom: 15px; display: flex; align-items: center; }
+        .search-menu .input-group label { width: 60px; }
+        .search-menu input { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        .search-menu .icon-btn { background: none; border: none; cursor: pointer; font-size: 24px; }
+        .search-menu .clear-btn { border: 1px solid #ccc; border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+        #small-search-menu { top: 65px; right: 20px; width: 300px; height: auto; padding: 15px; border-radius: var(--border-radius); transform-origin: top right; transition: transform 0.2s ease-out, opacity 0.2s; transform: scale(0.95); opacity: 0; pointer-events: none; }
+        #small-search-menu.open { transform: scale(1); opacity: 1; pointer-events: auto; }
+        #large-search-menu { top: 0; left: 0; width: 100%; height: auto; display: flex; flex-direction: column; padding: 15px 65px 15px 15px; border-bottom: 1px solid #eee; transition: transform 0.3s ease-in-out; transform: translateY(-110%); }
+        #large-search-menu.open { transform: translateY(0); }
+        #large-search-menu .search-controls { display: flex; width: 100%; gap: 10px; align-items: center; margin-top: 45px; }
+        #large-search-menu .input-group { flex: 1; margin-bottom: 0; }
+        #large-search-results { font-weight: bold; color: var(--success-color); margin-top: 10px; }
+        .nav-buttons { display: flex; justify-content: center; gap: 10px; margin-top: 10px; }
+        mark { background-color: #ffc107; padding: 0 2px; }
+        mark.current-match { background-color: #ff5722; color: white; }
+        
+        #comparison-help-btn { position: fixed; top: 20px; left: 20px; width: 40px; height: 40px; background-color: var(--secondary-color); border-radius: 50%; cursor: pointer; z-index: 2102; display: flex; justify-content: center; align-items: center; font-size: 24px; font-weight: bold; color: white; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+        #helpModal .modal-content ul { list-style-type: none; padding: 0; }
+        #helpModal .modal-content li { margin-bottom: 15px; line-height: 1.6; }
+        #helpModal .modal-content .icon { display: inline-block; width: 20px; text-align: center; margin-right: 10px; }
+        #statistics-legend { margin-top: 15px; font-size: 16px; line-height: 1.6; text-align: center; border-top: 1px solid #eee; padding-top: 15px; }
+        #statistics-chart { min-height: 300px; color: #333; }
+
+        /* === FLOATING ACTION BAR === */
+        .floating-action-bar {
+            position: fixed; bottom: 0; left: 0; width: 100%;
+            background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(5px);
+            border-top: 1px solid #e0e0e0; padding: 15px;
+            box-shadow: 0 -4px 15px rgba(0,0,0,0.1); z-index: 2000;
+            display: flex; justify-content: center; animation: slideUp 0.3s ease-out;
+        }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        .floating-action-bar .btn {
+            width: 100%; max-width: 800px; border-radius: 12px;
+            font-size: 18px; padding: 15px;
+            box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08);
+        }
+
+        /* === QUIZ STYLES === */
+        .options-container label { display: flex; align-items: center; margin-bottom: 10px; padding: 12px; border: 1px solid #ddd; border-radius: 5px; cursor: pointer; transition: background-color 0.2s; }
+        .options-container label:hover { background-color: #f0f0f0; }
+        .tf-option { display: flex; align-items: center; justify-content: space-between; padding: 12px; border: 1px solid #ddd; border-radius: var(--border-radius); margin-bottom: 10px; }
+        .tf-btn { padding: 8px 16px; border: 1px solid var(--secondary-color); background-color: white; color: var(--secondary-color); border-radius: 20px; cursor: pointer; font-weight: bold; transition: all 0.2s; min-width: 80px; text-align: center; }
+        .tf-btn.selected-true { background-color: var(--success-color); color: white; border-color: var(--success-color); }
+        .tf-btn.selected-false { background-color: var(--danger-color); color: white; border-color: var(--danger-color); }
+        
+        /* PROGRESS BAR STYLES */
+        .progress-wrapper { margin-bottom: 20px; }
+        .progress-bar-container { display: flex; height: 10px; background-color: #e9ecef; border-radius: 5px; overflow: hidden; width: 100%; margin-bottom: 8px; }
+        .progress-segment { flex: 1; border-right: 1px solid #fff; transition: background-color 0.3s; }
+        .progress-segment:last-child { border-right: none; }
+        .progress-segment.correct { background-color: var(--success-color) !important; }
+        .progress-segment.incorrect { background-color: var(--danger-color) !important; }
+        .progress-segment.active { background-color: #adb5bd; }
+        
+        .progress-info { 
+            display: flex; 
+            justify-content: center;
+            gap: 15px;
+            font-size: 1rem; 
+            color: var(--secondary-color);
+            flex-wrap: wrap; 
+            align-items: center;
+        }
+
+        /* SETTINGS */
+        #settings-icon-container { position: absolute; top: 15px; right: 20px; cursor: pointer; z-index: 100; padding: 5px; }
+        .hamburger-line { width: 25px; height: 3px; background-color: var(--secondary-color); margin: 5px 0; transition: 0.3s; }
+        #settings-panel { display: none; position: absolute; top: 50px; right: 20px; background-color: var(--secondary-bg); border-radius: var(--border-radius); box-shadow: var(--box-shadow); padding: 15px; z-index: 99; min-width: 250px; border: 1px solid #eee; }
+        .settings-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--primary-color); }
+        input:checked + .slider:before { transform: translateX(20px); }
+    </style>
+</head>
+<body id="main-body">
+
+    <!-- REWARD OVERLAY -->
+    <div id="reward-overlay">
+        <div id="reward-status-text"></div>
+    </div>
+    <div id="reward-badge">COMBO x0</div>
+
+    <div class="container" id="main-container">
+        <!-- LOGIN SCREEN -->
+        <div id="login-screen" class="screen active">
+            <h1>Chào mừng!</h1>
+            <p style="text-align: center; margin-bottom: 20px;">Vui lòng nhập tên của bạn để bắt đầu.</p>
+            <input type="text" id="username-input" placeholder="Nhập tên của bạn..." class="w-full p-2 border rounded mb-4">
+            <div class="button-group"><button id="login-btn" class="btn">Vào Menu Chính</button></div>
+        </div>
+
+        <!-- HOME SCREEN -->
+        <div id="home-screen" class="screen">
+            <h1>Quiz Player (IndexedDB)</h1>
+            <p id="user-greeting" style="text-align: center; margin-bottom: 20px; color: var(--secondary-color);"></p>
+            <div class="button-group">
+                <button class="btn" style="background-color: var(--success-color);" onclick="showScreen('pre-quiz-menu-screen')">Bắt đầu làm bài</button>
+                <button class="btn btn-secondary" onclick="showHistoryScreen()">Xem Lịch Sử Làm Bài</button>
+            </div>
+            <p style="text-align:center; font-size: 12px; color: #999; margin-top: 20px;">Dữ liệu được lưu an toàn trong IndexedDB</p>
+        </div>
+
+        <!-- MENU SCREEN -->
+        <div id="pre-quiz-menu-screen" class="screen">
+             <h2>Tùy chọn làm bài</h2>
+             <div class="button-group">
+                <button id="menu-shuffle-btn" class="btn">Trộn câu hỏi và đáp án: Tắt</button>
+                <button id="menu-start-btn" class="btn" style="background-color: var(--success-color);">Bắt Đầu</button>
+                <button id="menu-back-btn" class="btn btn-secondary" onclick="showScreen('home-screen')">Quay Lại</button>
+            </div>
+        </div>
+
+        <!-- QUIZ SCREEN -->
+        <div id="quiz-section" class="screen">
+            <div id="settings-icon-container" style="display: none;">
+                <div class="hamburger-line"></div>
+                <div class="hamburger-line"></div>
+                <div class="hamburger-line"></div>
+            </div>
+            <div id="settings-panel">
+                <div class="settings-row">
+                    <label>Âm thanh</label>
+                    <button id="master-volume-btn" class="icon-btn" style="background:none;border:none;" title="Nhấn để Tắt/Bật"></button>
+                </div>
+                <div id="detailed-audio-settings">
+                    <div class="settings-row">
+                        <label for="music-toggle">Nhạc nền</label>
+                        <label class="switch"><input type="checkbox" id="music-toggle"><span class="slider"></span></label>
+                    </div>
+                    <div class="settings-row">
+                        <label for="correct-sound-toggle">Khi trả lời đúng</label>
+                        <label class="switch"><input type="checkbox" id="correct-sound-toggle"><span class="slider"></span></label>
+                    </div>
+                     <div class="settings-row">
+                        <label for="incorrect-sound-toggle">Khi trả lời sai</label>
+                        <label class="switch"><input type="checkbox" id="incorrect-sound-toggle"><span class="slider"></span></label>
+                    </div>
+                </div>
+                <hr style="margin: 15px 0;">
+                <div class="settings-row">
+                    <label for="auto-advance-toggle">Tự động chuyển câu</label>
+                    <label class="switch">
+                        <input type="checkbox" id="auto-advance-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+            
+            <!-- PROGRESS BAR AREA -->
+            <div class="progress-wrapper">
+                <div class="progress-bar-container" id="progress-bar-visual"></div>
+                <div class="progress-info">
+                    <strong style="color: #333;">Thống kê:</strong>
+                    <span style="color: var(--success-color); font-weight: bold;">
+                        <span id="stat-correct-ratio">0/0</span> 
+                        (<span id="stat-correct-percent">0%</span>)
+                    </span>
+                    <span style="color: #ccc;">|</span>
+                    <span style="color: var(--danger-color); font-weight: bold;">
+                        <span id="stat-incorrect-ratio">0/0</span> 
+                        (<span id="stat-incorrect-percent">0%</span>)
+                    </span>
+                    <!-- COMBO BADGE -->
+                    <span id="combo-display" class="combo-counter" style="display:none;">COMBO x0</span>
+                </div>
+            </div>
+
+            <h2 id="quiz-title">Nội dung bài thi</h2>
+            <div id="quiz-live-container"></div>
+            
+            <!-- RESULT CONTAINER -->
+            <div id="results-container" style="display:none; text-align: center;">
+                <h2>Kết Quả</h2>
+                <p id="final-score" class="text-2xl font-bold mb-4"></p>
+                <div class="button-group">
+                    <button id="retry-btn" class="btn" style="background-color: var(--success-color);" onclick="startQuizFromMenu()">Làm Lại (Tất cả)</button>
+                    <button id="retry-wrong-btn" class="btn btn-warning" onclick="retryWrongQuestions()">Làm lại câu sai</button>
+                    <button id="exit-btn-result" class="btn btn-danger" onclick="showScreen('home-screen')">Thoát</button>
+                </div>
+            </div>
+
+            <!-- CONTROLS WHEN TAKING QUIZ -->
+            <div class="button-group" id="quiz-controls" style="padding-bottom: 20px;">
+                <button id="submit-early-btn" class="btn btn-warning" style="display:none;" onclick="submitEarly()">Nộp Bài Sớm</button>
+                <button id="exit-btn" class="btn btn-danger" onclick="showScreen('home-screen')">Thoát</button>
+            </div>
+        </div>
+
+        <!-- HISTORY SCREEN -->
+        <div id="history-list-screen" class="screen">
+            <div id="history-sidebar" class="sidebar">
+                <div class="p-4 font-bold">📜 Lịch Sử Làm Bài</div>
+                <div id="history-list" class="pill-container"></div>
+                <button class="btn btn-secondary m-2" onclick="showScreen('home-screen')">Về Trang Chủ</button>
+            </div>
+            <div id="history-mainContent" class="main-content with-sidebar">
+                <h1 class="text-2xl font-bold mb-4">Danh sách lịch sử làm bài</h1>
+                <p class="text-gray-600">👉 Vuốt sang trái để ẩn sidebar, vuốt sang phải để mở lại.</p>
+                <div id="history-questionBox" class="mt-6 p-4 bg-white rounded-xl shadow max-w-md hidden text-left space-y-4"></div>
+            </div>
+
+            <!-- MODALS -->
+            <div id="history-contentModal" class="modal">
+                <div id="history-contentModalContent" class="modal-content">
+                    <h3 id="history-modalTitle"></h3>
+                    <div id="history-modalContent"></div>
+                    <div class="button-group mt-4">
+                        <button class="btn btn-secondary" onclick="closeHistoryModal()">Quay lại</button>
+                        <button class="btn btn-danger" id="deleteHistoryBtn">Xóa</button>
+                    </div>
+                </div>
+            </div>
+            <div id="statisticsModal" class="modal">
+                <div class="modal-content">
+                    <button id="statistics-close-btn" style="position: absolute; top: 15px; right: 15px; width: 30px; height: 30px; border: none; background: #eee; border-radius: 50%; font-weight: bold; cursor: pointer;">X</button>
+                    <h3 id="statistics-modalTitle" style="text-align: center;">Thống kê kết quả</h3>
+                    <div id="statistics-content">
+                        <div id="statistics-chart"></div>
+                        <div id="statistics-legend"></div>
+                    </div>
+                </div>
+            </div>
+            <div id="comparisonModal" class="modal">
+                <div class="modal-content" id="comparisonModalContent">
+                    <button id="comparison-help-btn" style="display: none;">?</button>
+                    <div id="comparison-menu-btn" style="display: none;">
+                        <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+                    </div>
+                    <h3 id="comparison-modalTitle"></h3>
+                    <div id="comparison-content"></div>
+                    <div class="button-group mt-4">
+                        <button class="btn btn-secondary" onclick="closeComparisonModal()">Quay lại</button>
+                    </div>
+                </div>
+                
+                <div id="small-search-menu" class="search-menu">
+                    <h4>Tìm Câu Nhanh</h4>
+                    <div class="input-group"><label for="dao-input">Đảo</label><input type="number" id="dao-input" placeholder="Số đã đảo..."></div>
+                    <div class="input-group"><label for="thuan-input">Thuận</label><input type="number" id="thuan-input" placeholder="Số gốc..."></div>
+                    <div class="input-group" style="justify-content: flex-end; margin-bottom: 0;"><span class="clear-btn" id="clear-small-search">xóa</span><button class="icon-btn" id="exec-small-search">🔎</button></div>
+                </div>
+                <div id="large-search-menu" class="search-menu">
+                    <div class="search-controls">
+                        <span class="clear-btn" id="clear-large-search">xóa</span>
+                        <div class="input-group"><input type="text" id="large-search-input" placeholder="Nhập nội dung cần tìm..."></div>
+                        <button class="icon-btn" id="exec-large-search">🔎</button>
+                    </div>
+                     <div id="large-search-results"></div>
+                    <div class="nav-buttons"><button class="btn btn-secondary" id="prev-match-btn">Quay lại</button><button class="btn btn-secondary" id="next-match-btn">Kế tiếp</button></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- FLOATING ACTION BAR -->
+    <div id="fixed-action-bar" class="floating-action-bar" style="display: none;">
+        <button id="fixed-action-btn" class="btn">Trả Lời</button>
+    </div>
+
+    <!-- HELP MODAL -->
+    <div id="helpModal" class="modal">
+        <div class="modal-content">
+            <h3>Trợ giúp & Hướng dẫn</h3>
+            <ul>
+                <li><span class="icon">🎨</span><strong>Màu nền giống nhau:</strong> Các đáp án có cùng màu nền ở cột "Đề gốc" và cột "Đề đảo" là cùng một đáp án.</li>
+                 <li><span class="icon" style="color: var(--success-color); font-weight: bold;">■</span><strong style="color: var(--success-color);">Chữ Xanh Lá & In Đậm:</strong> Là đáp án đúng mà bạn đã chọn đúng.</li>
+                 <li><span class="icon" style="color: var(--success-color);">■</span><span style="color: var(--success-color); text-decoration: underline;">Chữ Xanh Lá & Gạch chân:</span> Là đáp án đúng bạn đã bỏ sót.</li>
+                 <li><span class="icon" style="color: var(--danger-color);">■</span><strong style="color: var(--danger-color);">Chữ Đỏ:</strong> Là đáp án sai mà bạn đã chọn.</li>
+            </ul>
+            <div class="button-group">
+                <button class="btn btn-secondary" onclick="document.getElementById('helpModal').style.display='none'">Đã hiểu</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const QUIZ_DATA_SETS = {
+  "Lịch sử 11": [
+    {
+      "cau_hoi": "Câu 1. Mục tiêu chung của các cuộc cách mạng tư sản thế kỉ XVI- XVIII là.",
+      "lua_chon": [
+        "*A. lật đổ chế đổ phong kiến, thực dân cùng tàn tích của nó.",
+        "B. lật đổ chế độ phong kiến, cổ đại cùng tàn tích của nó.",
+        "C. tạo điều kiện cho sự phát triển của chế độ phong kiến.",
+        "D. mở đường cho sự phát triển của chủ nghĩa xã hội."
+      ],
+      "dap_an_dung": [
+        "*A. lật đổ chế đổ phong kiến, thực dân cùng tàn tích của nó."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 2. Chủ nghĩa tư bản hiện đại là thuật ngữ dùng để chỉ chủ nghĩa tư bản.",
+      "lua_chon": [
+        "A. trong giai đoạn tự do cạnh tranh.",
+        "B. bắt đầu chuyển sang giai đoạn độc quyền.",
+        "*C. từ sau chiến tranh thế giới thứ hai đến nay.",
+        "D. Từ sau chiến tranh thế giới thứ nhất đến nay."
+      ],
+      "dap_an_dung": [
+        "*C. từ sau chiến tranh thế giới thứ hai đến nay."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 3. Quốc gia nào sau đây đã thành lập nhà nước chuyên chính vô sản đầu tiên trên thế  giới?",
+      "lua_chon": [
+        "A. Trung Quốc.",
+        "B. Pháp.",
+        "*C. Liên Xô.",
+        "D. Mĩ."
+      ],
+      "dap_an_dung": [
+        "*C. Liên Xô."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 4. Lãnh đạo cách mạng tháng Mười Nga năm 1917 là.",
+      "lua_chon": [
+        "A. Các Mác.",
+        "B. Ănghen.",
+        "C. Xtalin.",
+        "*D. Lênin."
+      ],
+      "dap_an_dung": [
+        "*D. Lênin."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 5. Trong những năm 1944-1945, ở Đông Âu, quốc gia nào sau đây đã thành lập chính      quyền dân chủ nhân dân?",
+      "lua_chon": [
+        "A. Hà Lan.",
+        "B. Trung Quốc.",
+        "*C. Bun-ga-ri.",
+        "D. Liên Xô."
+      ],
+      "dap_an_dung": [
+        "*C. Bun-ga-ri."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 6. Quốc gia nào sau đây ở Mĩ la tinh chọn con đường phát triển lên chủ nghĩa  xã hội?",
+      "lua_chon": [
+        "*A. Cuba.",
+        "B. Braxin.",
+        "C. Áchentina.",
+        "D. Mêhicô."
+      ],
+      "dap_an_dung": [
+        "*A. Cuba."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 7. Từ thế kỉ XVI, các nước phương Tây bắt đầu  xâm nhập vào khu vực Đông Nam Á thông qua hoạt động.",
+      "lua_chon": [
+        "*A. buôn bán và truyền giáo.",
+        "B. đầu tư phát triển kinh tế.",
+        "C. mở rộng giao lưu văn hóa.",
+        "D. xây dựng cơ sở hạ tầng."
+      ],
+      "dap_an_dung": [
+        "*A. buôn bán và truyền giáo."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 8. Các nước thực dân phương Tây xâm lược Đông Nam Á trong bối  cảnh phần lớn các nước ở đây",
+      "lua_chon": [
+        "A. có nền kinh tế phát triển mạnh mẽ.",
+        "B. có tình hình hình chính trị, xã hội ổn định.",
+        "C. chế độ phong kiến phát triển đỉnh cao.",
+        "*D. chế độ phong kiến suy thoái, khủng hoảng."
+      ],
+      "dap_an_dung": [
+        "*D. chế độ phong kiến suy thoái, khủng hoảng."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 9. Các cuộc cách mạng tư sản thế kỉ XVI -    XVIII có hai nhiệm vụ cơ bản là.",
+      "lua_chon": [
+        "*A. dân tộc và dân chủ.",
+        "B. dân tộc và dân sinh.",
+        "C. độc lập và tự do.",
+        "D. dân chủ và dân quyền."
+      ],
+      "dap_an_dung": [
+        "*A. dân tộc và dân chủ."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 10. Một trong những thách thức mà chủ nghĩa tư bản hiện đại phải đối mặt là.",
+      "lua_chon": [
+        "*A. tiềm ẩn nguy cơ khủng hoảng tài chính mang tính toàn cầu.",
+        "B. sức sản xuất của các ngành kinh tế ngày càng cao.",
+        "C. khoa học công nghệ phát triển và ngày càng mở rộng.",
+        "D. lực lượng lao động có chất lượng ngày càng cao."
+      ],
+      "dap_an_dung": [
+        "*A. tiềm ẩn nguy cơ khủng hoảng tài chính mang tính toàn cầu."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 11. Mục tiêu của việc thành lập Liên bang Cộng hòa xã hội chủ  nghĩa Xô viết là.",
+      "lua_chon": [
+        "A. chống lại sự tấn công của 14 nước đế quốc.",
+        "B. thực hiện hiệu quả chính sách kinh tế mới.",
+        "*C. hợp tác, giúp đỡ lẫn nhau để cùng phát triển.",
+        "D. chống lại cuộc tấn công của phát xít Đức."
+      ],
+      "dap_an_dung": [
+        "*C. hợp tác, giúp đỡ lẫn nhau để cùng phát triển."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 12. Đối với Liên Xô, sự ra đời của Liên bang Cộng hoà xã hội chủ nghĩa Xô viết không có ý nghĩa nào sau đây?",
+      "lua_chon": [
+        "A. Thể hiện sức mạnh đoàn kết, giúp đỡ nhau giữa các dân tộc Xô viết.",
+        "B. Phù hợp với lợi ích chung của các dân tộc trên đất nước Xô viết.",
+        "C. Tăng cường vị thế của Nhà nước Liên Xô trên trường quốc tế.",
+        "*D. Tạo tiền đề cho sự ra đời của hệ thống xã hội chủ nghĩa trên thế giới."
+      ],
+      "dap_an_dung": [
+        "*D. Tạo tiền đề cho sự ra đời của hệ thống xã hội chủ nghĩa trên thế giới."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 13. Một trong những chính sách cai trị về văn hóa, xã hội của thực dân phương Tây đối với các nước Đông Nam Á từ cuối thế kỉ XIX là.",
+      "lua_chon": [
+        "A. thực hiện chính sách chia để trị    .",
+        "B. cử học sinh giỏi đi du học phương Tây.",
+        "*C. thực hiện chính sách ngu dân.",
+        "D. xây dựng cơ sở hạ tầng hiện đại."
+      ],
+      "dap_an_dung": [
+        "*C. thực hiện chính sách ngu dân."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 14. Một trong những chính sách cai trị về kinh tế của thực dân phương Tây đối với các nước Đông Nam Á từ cuối thế kỉ XIX là.",
+      "lua_chon": [
+        "*A. vơ vét tài nguyên thiên nhiên.",
+        "B. đưa quân đội trực tiếp cai trị.",
+        "C. tập trung phát triển công nghiệp nặng.",
+        "D. truyền bá và áp đặt Thiên chúa giáo."
+      ],
+      "dap_an_dung": [
+        "*A. vơ vét tài nguyên thiên nhiên."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 15. Kết quả chung của các cuộc cách mạng tư sản thời cận đại là.",
+      "lua_chon": [
+        "*A. lật đổ chế độ phong kiến, thực dân và thiết lập chế độ tư bản chủ nghĩa.",
+        "B. lật đổ chế độ phong kiến, thiết lập chế độ cộng hòa.",
+        "C. lật đổ chế độ quân chủ chuyên chế, thiết lập chế độ quân chủ lập hiến.",
+        "D. lật đổ sự thống trị của thực dân Anh, giành độc lập dân tộc."
+      ],
+      "dap_an_dung": [
+        "*A. lật đổ chế độ phong kiến, thực dân và thiết lập chế độ tư bản chủ nghĩa."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 16. Một trong những thách thức mà chủ nghĩa tư bản hiện đại phải đối mặt là.",
+      "lua_chon": [
+        "*A. tiềm ẩn nguy cơ khủng hoảng tài chính mang tính toàn cầu.",
+        "B. sức sản xuất của các ngành kinh tế ngày càng cao.",
+        "C. khoa học công nghệ phát triển và ngày càng mở rộng.",
+        "D. lực lượng lao động có chất lượng ngày càng cao."
+      ],
+      "dap_an_dung": [
+        "*A. tiềm ẩn nguy cơ khủng hoảng tài chính mang tính toàn cầu."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 17. Thắng lợi nào sau đây dẫn đến sự ra đời của Nhà nước xã hội chủ nghĩa đầu tiên trên thế giới?",
+      "lua_chon": [
+        "A. Cách mạng tháng Hai (1917) ở Nga.",
+        "*B. Cách mạng tháng Mười Nga (1917).",
+        "C. Cách mạng Nga năm 1905 - 1907.",
+        "D. Công xã Pa-ri năm 1871 ở Pháp."
+      ],
+      "dap_an_dung": [
+        "*B. Cách mạng tháng Mười Nga (1917)."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 18. Năm 1922, Đại hội lần thứ nhất các Xô viết toàn Liên bang đã thông qua.",
+      "lua_chon": [
+        "*A. Tuyên ngôn thành lập Cộng hòa xã hội chủ nghĩa Xô viết.",
+        "B. Hiến pháp đầu tiến của Cộng hòa xã hội chủ nghĩa Xô viết.",
+        "C. Cương lĩnh xây dựng đất nước tiến lên chủ nghĩa xã hội.",
+        "D. Báo cáo chính trị và báo cáo sửa đổi điều lệ Đảng Cộng sản."
+      ],
+      "dap_an_dung": [
+        "*A. Tuyên ngôn thành lập Cộng hòa xã hội chủ nghĩa Xô viết."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 19. Công cuộc cải cách toàn diện ở nước Xiêm cuối thế kỉ XIX chủ yếu được tiến hành dưới thời trị vì của vua.",
+      "lua_chon": [
+        "*A. Rama V.",
+        "B. Nô -rô - đôm.",
+        "C. Minh Trị  .",
+        "D. Quang Tự."
+      ],
+      "dap_an_dung": [
+        "*A. Rama V."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 20. Trong công cuộc cải cách cuối thế kỉ XIX, chính phủ Xiêm đã thực hiện chính sách nào sau đây  về mặt chính trị?",
+      "lua_chon": [
+        "A. Khuyến khích đầu tư vào các ngành công nghiệp, giao thông.",
+        "B. Công bố chương trình giáo dục quốc gia đầu tiên ở Xiêm.",
+        "C. Cắt nhượng một số vùng lãnh thổ thuộc ảnh hưởng của Xiêm.",
+        "*D. Xây dựng mô hình nhà nước thống nhất, tập trung, hiện đại."
+      ],
+      "dap_an_dung": [
+        "*D. Xây dựng mô hình nhà nước thống nhất, tập trung, hiện đại."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 21. Lãnh đạo của các cuộc cách mạng tư sản từ giữa thế kỉ XVI đến đầu thế kỉ XX là.",
+      "lua_chon": [
+        "A. địa chủ.",
+        "B. nông dân.",
+        "C. công nhân.",
+        "*D. quý tộc mới."
+      ],
+      "dap_an_dung": [
+        "*D. quý tộc mới."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 22. Quốc gia nào sau đây khởi đầu cuộc Cách mạng công nghiệp ở thế kỉ XVIII?",
+      "lua_chon": [
+        "A. Pháp.",
+        "B. Đức.",
+        "C. I-ta-li-a",
+        "*D. Anh."
+      ],
+      "dap_an_dung": [
+        "*D. Anh."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 23. Sau Cách mạng tháng Mười Nga, nhiệm vụ hàng đầu của chính quyền Xô viết là.",
+      "lua_chon": [
+        "*A. đập tan bộ máy nhà nước cũ, xây dựng bộ máy nhà nước mới.",
+        "B. hàn gắn vết thương chiến tranh, khôi phục và phát triển kinh tế.",
+        "C. khôi phục và phát triển kinh tế, chống lại thù trong giặc ngoài.",
+        "D. tiến hành công nghiệp hóa, hiện đại hóa tiến lên chủ nghĩa xã hội."
+      ],
+      "dap_an_dung": [
+        "*A. đập tan bộ máy nhà nước cũ, xây dựng bộ máy nhà nước mới."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 24. Ngày 30-12-1922, Đại hội lần thứ nhất các Xô viết toàn Liên bang đã thông qua bản Tuyên ngôn thành lập Liên bang cộng hoà xã hội chủ nghĩa Xô Viết tại.",
+      "lua_chon": [
+        "*A. Mát-xcơ-va.",
+        "B. Xta-ling-grát.",
+        "C. Pê-tơ-rô-grat.",
+        "D. Điện Xmô-nưi."
+      ],
+      "dap_an_dung": [
+        "*A. Mát-xcơ-va."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 25. Năm 1949, quốc gia nào sau đây đã lựa chọn con đường đi lên chủ nghĩa xã hội?",
+      "lua_chon": [
+        "*A. Trung Quốc.",
+        "B. Việt Nam.",
+        "C. Triều Tiên.",
+        "D. Cu-ba."
+      ],
+      "dap_an_dung": [
+        "*A. Trung Quốc."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 26. Quốc gia nào sau đây không lựa chọn con đường đi lên chủ nghĩa xã hội từ 1945 đến những năm 70 của thế kỉ XX?",
+      "lua_chon": [
+        "A. Hung-ga-ri.",
+        "*B. Hàn Quốc.",
+        "C. Ba Lan.",
+        "D. Lào."
+      ],
+      "dap_an_dung": [
+        "*B. Hàn Quốc."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 27. Quốc gia nào sau đây đã mở đầu cho quá trình xâm lược của thực dân phương Tây vào khu vực Đông Nam Á.",
+      "lua_chon": [
+        "*A. Bồ Đào Nha.",
+        "B. Tây Ban Nha.",
+        "C. Anh.",
+        "D. Pháp."
+      ],
+      "dap_an_dung": [
+        "*A. Bồ Đào Nha."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 28. Những nội dung cải cách của vua Ra-ma V đã đưa Xiêm phát triển theo.",
+      "lua_chon": [
+        "*A. con đường tư bản chủ nghĩa.",
+        "B. con đường xã hội chủ nghĩa.",
+        "C. thể chế Tổng thống Liên bang.",
+        "D. liên kết với các nước trong khu vực."
+      ],
+      "dap_an_dung": [
+        "*A. con đường tư bản chủ nghĩa."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 29. Nội dung nào sau đây là tiền đề về kinh tế dẫn đến sự bùng nổ và thắng lợi của các cuộc cách mạng tư sản từ giữa thế kỉ XVI đến đầu thế kỉ XX?",
+      "lua_chon": [
+        "A. Quan hệ sản xuất tư bản chủ nghĩa thay thế hoàn toàn quan hệ phong kiến.",
+        "B. Triết học Ánh sáng ra đời, thức tĩnh, dọn đường cho quần chúng đấu tranh.",
+        "C. Giai cấp tư sản và đồng minh có thế lực rất lớn cả về kinh tế và chính trị.",
+        "*D. Kinh tế tư bản chủ nghĩa ra đời và phát triển trong lòng chế độ phong kiến."
+      ],
+      "dap_an_dung": [
+        "*D. Kinh tế tư bản chủ nghĩa ra đời và phát triển trong lòng chế độ phong kiến."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 30. Nội dung nào sau đây là thách thức mà chủ nghĩa tư bản hiện đại phải đối mặt?",
+      "lua_chon": [
+        "A. Nguồn nhân công ngày càng cạn kiệt.",
+        "B. Giao lưu kinh tế quốc tế ngày càng tăng.",
+        "*C. Mâu thuẫn xã hội ngày càng gia tăng.",
+        "D. Sự ra đời các tổ chức liên kết khu vực."
+      ],
+      "dap_an_dung": [
+        "*C. Mâu thuẫn xã hội ngày càng gia tăng."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 31. Đầu thế kỉ XIX, các nước Mĩ Latinh giành độc lập từ tay thực dân.",
+      "lua_chon": [
+        "*A. Tây Ban Nha và Bồ Đào Nha.",
+        "B. Anh và đế quốc Mĩ.",
+        "C. Tây Ban Nha và Pháp.",
+        "D. Pháp và Đức.aza\t."
+      ],
+      "dap_an_dung": [
+        "*A. Tây Ban Nha và Bồ Đào Nha."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 32. Chủ nghĩa tư bản hiện đại là thuật ngữ dùng để chỉ chủ nghĩa tư bản.",
+      "lua_chon": [
+        "A. trong giai đoạn tự do cạnh tranh.",
+        "B. bắt đầu chuyển sang giai đoạn độc quyền.",
+        "*C. từ sau chiến tranh thế giới thứ II đến nay.",
+        "D. Từ sau chiến tranh thế giới thứ I đến nay."
+      ],
+      "dap_an_dung": [
+        "*C. từ sau chiến tranh thế giới thứ II đến nay."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 33. Một trong những thách thức mà chủ nghĩa tư bản hiện đại phải đối mặt là.",
+      "lua_chon": [
+        "*A. tiềm ẩn nguy cơ khủng hoảng tài chính mang tính toàn cầu.",
+        "B. sức sản xuất của các ngành kinh tế ngày càng cao.",
+        "C. khoa học công nghệ phát triển và ngày càng mở rộng.",
+        "D. lực lượng lao động có chất lượng ngày càng cao."
+      ],
+      "dap_an_dung": [
+        "*A. tiềm ẩn nguy cơ khủng hoảng tài chính mang tính toàn cầu."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 34. Chủ nghĩa tư bản được xác lập đầu tiên trên thế giới  ở.",
+      "lua_chon": [
+        "*A. Châu Âu và Bắc Mĩ.",
+        "B. Tây Âu và Châu Á.",
+        "C. Bắc Mĩ và Nam Á.",
+        "D. Châu Á và Châu Phi."
+      ],
+      "dap_an_dung": [
+        "*A. Châu Âu và Bắc Mĩ."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 35. Sự kiện đánh dấu sự mở rộng của cuộc cách mạng tư sản bên ngoài châu  Âu là.",
+      "lua_chon": [
+        "A. Cách mạng tư sản Anh.",
+        "B. Các mạng tư sản Pháp.",
+        "C. Cách mạng tư sản Hà Lan.",
+        "*D. Chiến tranh giành độc lập ở Bắc Mĩ."
+      ],
+      "dap_an_dung": [
+        "*D. Chiến tranh giành độc lập ở Bắc Mĩ."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 36. Một trong những đặc điểm cơ bản của chủ nghĩa tư bản hiện đại là.",
+      "lua_chon": [
+        "A. bước đầu xuất khẩu tư bản.",
+        "*B. xuất hiện độc quyền nhà nước.",
+        "C. bước đầu xâm lược thuộc địa.",
+        "D. xuất hiện tư bản tài chính."
+      ],
+      "dap_an_dung": [
+        "*B. xuất hiện độc quyền nhà nước."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 37. Sự xác lập của chủ nghĩa tư bản ở châu Âu và Bắc Mĩ thế kỉ XVII – XIX có điểm chung là.",
+      "lua_chon": [
+        "A. thiết lập chế độ quân chủ lập hiến.",
+        "B. thiết  lập chế độ cộng hòa.",
+        "C. lật đổ chế độ thực dân.",
+        "*D. do giai cấp tư sản lãnh đạo"
+      ],
+      "dap_an_dung": [
+        "*D. do giai cấp tư sản lãnh đạo"
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 38. Các nước tư bản hiện đại tiêu biểu là.",
+      "lua_chon": [
+        "A. Mĩ, Anh, Trung Quốc.",
+        "B. Mĩ, Nhật, Cu Ba.",
+        "*C. Mĩ, Nhật, Đức.",
+        "D. Mĩ, Nhật, Trung Quốc."
+      ],
+      "dap_an_dung": [
+        "*C. Mĩ, Nhật, Đức."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 39. Sự khác biệt giữa chủ nghĩa tư bản tự do cạnh tranh và chủ nghĩa tư bản độc  quyền xuất phát từ.",
+      "lua_chon": [
+        "A. sự phát triển kinh tế và công nghiệp.",
+        "B. Sự cạnh tranh và chiến lược kinh doanh.",
+        "C. Sự bất ổn định, phân hóa giàu nghèo.",
+        "*D. Sự tập trung tài sản và quyền lực."
+      ],
+      "dap_an_dung": [
+        "*D. Sự tập trung tài sản và quyền lực."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 40. Từ đầu thế kỉ XIX, để đáp ứng nhu cầu ngày càng cao về nguyên liệu và nhân công, các nước tư bản phương Tây đã tăng cường.",
+      "lua_chon": [
+        "A. hợp tác và mở rộng đầu tư.",
+        "B. thu hút vốn đầu tư bên ngoài.",
+        "*C. xâm lược và mở rộng thuộc địa.",
+        "D. đổi mới hình thức kinh doanh."
+      ],
+      "dap_an_dung": [
+        "*C. xâm lược và mở rộng thuộc địa."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 41. Lãnh đạo cách mạng tháng Mười Nga năm 1917 là.",
+      "lua_chon": [
+        "A. Các Mác.",
+        "B. Ănghen.",
+        "C. Xtalin.",
+        "*D. Lênin."
+      ],
+      "dap_an_dung": [
+        "*D. Lênin."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 42. Liên bang Cộng hoà xã hội chủ nghĩa Xô viết được thành lập trong bối  cảnh lịch sử nào sau đây?",
+      "lua_chon": [
+        "*A. Các nước cộng hòa Xô viết phát triển không đồng đều về kinh tế.",
+        "B. Mâu thuẫn giữa các dân tộc Nga với chế độ Nga hoàng gay gắt.",
+        "C. Các nước cộng hòa Xô Viết có sự thống nhất về chính sách phát triển.",
+        "D. Mâu thuẫn giữa nước Nga với các nước cộng hòa Xô viết gay gắt."
+      ],
+      "dap_an_dung": [
+        "*A. Các nước cộng hòa Xô viết phát triển không đồng đều về kinh tế."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 43. Đặc điểm nổi bật của tình hình nước Nga sau cách mạng tháng Hai năm 1917 l.",
+      "lua_chon": [
+        "*A. hai chính quyền song song tồn tại.",
+        "B. Nhân dân lên nắm chính quyền.",
+        "C. ba chính quyền tồn tại đồng thời.",
+        "D. giai cấp tư sản nắm chính quyền."
+      ],
+      "dap_an_dung": [
+        "*A. hai chính quyền song song tồn tại."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 44. Mục tiêu của việc thành lập Liên bang Cộng hòa xã hội chủ  nghĩa Xô viết là.",
+      "lua_chon": [
+        "A. chống lại sự tấn công của 14 nước đế quốc.",
+        "B. thực hiện hiệu quả chính sách kinh tế mới.",
+        "*C. hợp tác, giúp đỡ lẫn nhau để cùng phát triển.",
+        "D. chống lại cuộc tấn công của phát xít Đức."
+      ],
+      "dap_an_dung": [
+        "*C. hợp tác, giúp đỡ lẫn nhau để cùng phát triển."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 45. Năm 1917, nước Nga diễn ra hai cuộc cách mạng xã hội đều gắn với sự    lãnh đạo của.",
+      "lua_chon": [
+        "*A. giai cấp tư sản.",
+        "B. giai cấp vô sản.",
+        "C. tiểu tư sản trí thức.",
+        "D. địa chủ phong kiến."
+      ],
+      "dap_an_dung": [
+        "*A. giai cấp tư sản."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 46. Cách mạng tháng Mười Nga năm 1917 đã.",
+      "lua_chon": [
+        "*A. lật đổ được Chính phủ tư sản lâm thời.",
+        "B. lật đổ được chế độ quân chủ chuyên chế.",
+        "C. đưa nước Nga ra khỏi cuộc Chiến tranh thế giới.",
+        "D. giải phóng các dân tộc khỏi chế độ tư bản chủ nghĩa."
+      ],
+      "dap_an_dung": [
+        "*A. lật đổ được Chính phủ tư sản lâm thời."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 47. Năm 1922, Đại hội lần thứ nhất các Xô viết toàn Liên bang đã thông qua.",
+      "lua_chon": [
+        "*A. Tuyên ngôn thành lập Cộng hòa xã hội chủ nghĩa Xô viết.",
+        "B. Hiến pháp đầu tiến của Cộng hòa xã hội chủ nghĩa Xô viết.",
+        "C. Cương lĩnh xây dựng đất nước tiến lên chủ nghĩa xã hội.",
+        "D. Báo cáo chính trị và báo cáo sửa đổi điều lệ Đảng Cộng sản."
+      ],
+      "dap_an_dung": [
+        "*A. Tuyên ngôn thành lập Cộng hòa xã hội chủ nghĩa Xô viết."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 48. Một trong những tư tưởng chỉ đạo của Lê-nin trong việc thành lập Liên bang Cộng hòa xã hội chủ nghĩa Xô viết năm 1922 là.",
+      "lua_chon": [
+        "*A. sự bình đẳng về mọi mặt.",
+        "B. phân biệt về tôn giáo.",
+        "C. đồng hóa về văn hóa.",
+        "D. phân biệt về chủng tộc."
+      ],
+      "dap_an_dung": [
+        "*A. sự bình đẳng về mọi mặt."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 49. Đối với Liên Xô, sự ra đời của Liên bang Cộng hoà xã hội chủ nghĩa Xô viết không có ý nghĩa nào sau đây?",
+      "lua_chon": [
+        "A. Thể hiện sức mạnh đoàn kết, giúp đỡ nhau giữa các dân tộc Xô viết.",
+        "B. Phù hợp với lợi ích chung của các dân tộc trên đất nước Xô viết.",
+        "C. Tăng cường vị thế của Nhà nước Liên Xô trên trường quốc tế.",
+        "*D. Tạo tiền đề cho sự ra đời của hệ thống xã hội chủ nghĩa trên thế giới."
+      ],
+      "dap_an_dung": [
+        "*D. Tạo tiền đề cho sự ra đời của hệ thống xã hội chủ nghĩa trên thế giới."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 50. Nội dung nào sau đây phản ánh đúng sự ra đời của Liên bang Cộng hòa xã hội chủ nghĩa Xô viết năm 1922?",
+      "lua_chon": [
+        "*A. Phù hợp với lợi ích chung của các dân tộc trên đất nước Xô viết.",
+        "B. Phù hợp với xu thế phát triển chung của thế giới lúc bấy giờ.",
+        "C. Đáp ứng được nhiệm vụ cấp bách trong đấu tranh chống ngoại xâm.",
+        "D. Chưa phù hợp với nguyện vọng các dân tộc trên đất nước Xô viết."
+      ],
+      "dap_an_dung": [
+        "*A. Phù hợp với lợi ích chung của các dân tộc trên đất nước Xô viết."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 51. Đối với thế giới, sự ra đời của Liên bang Cộng hoà xã hội chủ nghĩa Xô viết không có ý nghĩa nào sau đây?",
+      "lua_chon": [
+        "*A. Tăng cường vị thế của Nhà nước Liên Xô trên trường quốc tế.",
+        "B. Cổ vũ mạnh mẽ phong trào giải phóng dân tộc trên thế giới.",
+        "C. Để lại nhiều bài học kinh nghiệm quý báu về mô hình nhà nước.",
+        "D. Chứng minh học thuyết Mác – Lênin là đúng đắn, khoa học."
+      ],
+      "dap_an_dung": [
+        "*A. Tăng cường vị thế của Nhà nước Liên Xô trên trường quốc tế."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 52. Vùng đất đầu tiên ở Đông Nam Á bị thực dân phương Tây xâm lược là.",
+      "lua_chon": [
+        "A. bán đảo Sơn Trà – Đà Nẵng (Việt Nam)  .",
+        "*B. Ma – lắc – ca (Ma – lai – xi – a).",
+        "C. Tiểu quốc Hồi giáo Kê – đa (In – đô – nê – xi – a).",
+        "D. Thương cảng Xin – ga – pô."
+      ],
+      "dap_an_dung": [
+        "*B. Ma – lắc – ca (Ma – lai – xi – a)."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 53. “Chúng lập ra ba chế độ khác nhau ở Trung, Nam, Bắc để ngăn cản việc thống nhất nước nhà của ta, để ngăn cản dân tộc ta đoàn kết”. \n                     (Hồ Chí Minh toàn tập, tập 4, NXB Chính trị Quốc gia Sự thật, Hà Nội, 2011, trang 2,3)\nĐoạn tư liệu trên phản ánh chính sách cai trị của thực dân Pháp ở Việt Nam trên lĩnh vực nào?",
+      "lua_chon": [
+        "A. Văn hóa.",
+        "B. Tôn giáo.",
+        "C. Kinh tế",
+        "*D. Chính trị."
+      ],
+      "dap_an_dung": [
+        "*D. Chính trị."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 54. Chính sách bóc lột của các nước thực dân phương Tây đã làm cho kinh tế các nước Đông Nam Á.",
+      "lua_chon": [
+        "*A. lạc hậu.",
+        "B. phát triển.",
+        "C. hội nhập quốc tế.",
+        "D. khủng hoảng thừa."
+      ],
+      "dap_an_dung": [
+        "*A. lạc hậu."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 55: Một trong những cơ hội thuận lợi để các nước tư bản phương Tây tiến hành xâm lược các nước Đông Nam Á (thế kỉ XVI- XIX) là các quốc gia phong kiến ở đây.",
+      "lua_chon": [
+        "A. giàu tài nguyên.",
+        "*B. suy yếu, khủng hoảng.",
+        "C. có vị trí chiến lược.",
+        "D. vừa mới hình thành."
+      ],
+      "dap_an_dung": [
+        "*B. suy yếu, khủng hoảng."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 56: Hầu hết người dân thuộc địa các nước Đông Nam Á đều mù chữ. Ở Mã Lai, năm 1931 chỉ có 8,5% dân số biết chữ; ở Việt Nam, năm 1926 chỉ có khoảng 6% trẻ em ở độ tuổi đi học được tới trường, hơn 90% dân số không biết chữ.\n                      (SGK Lịch sử 11, Bộ kết nối tri thúc với cuộc sống, NXB Giáo dục Việt Nam, 2023, tr.33)\nThực trạng trên là hệ quả trực tiếp của chính sách nào sau đây của thực dân phương Tây ở các nước Đông Nam Á?",
+      "lua_chon": [
+        "*A. Ngu dân     .",
+        "B. Tăng thuế.",
+        "C. Độc chiếm thị trường.",
+        "D. Chia để trị."
+      ],
+      "dap_an_dung": [
+        "*A. Ngu dân     ."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 57: Sau cuộc chiến tranh Mỹ - Tây Ban Nha (1898), Phi-lip-pin trở thành thuộc địa của.",
+      "lua_chon": [
+        "*A. Mỹ.",
+        "B. Tây Ban Nha.",
+        "C. Bồ Đào Nha.",
+        "D. Pháp."
+      ],
+      "dap_an_dung": [
+        "*A. Mỹ."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 58: Về mặt chính trị, sau khi hoàn thành xâm lược Đông Nam Á, các nước thực dân phương Tây đã thi hành chính sách nào sau đây?",
+      "lua_chon": [
+        "*A. chia để trị.",
+        "B. tăng thuế.",
+        "C. đồng hóa văn hóa.",
+        "D. tập trung khai mỏ."
+      ],
+      "dap_an_dung": [
+        "*A. chia để trị."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 59: Quốc gia nào sau đây đã mở đầu cho quá trình xâm lược của thực dân phương Tây vào khu vực Đông Nam Á.",
+      "lua_chon": [
+        "*A. Bồ Đào Nha.",
+        "B. Tây Ban Nha.",
+        "C. Anh.",
+        "D. Pháp."
+      ],
+      "dap_an_dung": [
+        "*A. Bồ Đào Nha."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 60: Trong chính sách cai trị về văn hóa - giáo dục ở Đông Nam Á từ cuối thế kỉ XIX, thực dân phương Tây đã.",
+      "lua_chon": [
+        "*A. kìm hãm người dân thuộc địa trong tình trạng lạc hậu.",
+        "B. phát triển kinh tế ở những nơi có điều kiện phù hợp.",
+        "C. chú trọng xây dựng hệ thống đường giao thông.",
+        "D. xây dựng nhiều trường đại học có quy mô lớn."
+      ],
+      "dap_an_dung": [
+        "*A. kìm hãm người dân thuộc địa trong tình trạng lạc hậu."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 61: Vào giữa thế kỉ XIX, Vương quốc Xiêm đứng trước sự đe dọa xâm lược của.",
+      "lua_chon": [
+        "*A. thực dân phương Tây.",
+        "B. phong kiến Trung Quốc.",
+        "C. quân phiệt Nhật Bản.",
+        "D. đế quốc Mông Cổ."
+      ],
+      "dap_an_dung": [
+        "*A. thực dân phương Tây."
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "cau_hoi": "Câu 62: Xiêm là nước duy nhất ở Đông Nam Á giữ được độc lập tương đối về chính trị vì một trong những lí do nào sau đây?",
+      "lua_chon": [
+        "*A. Do thực hiện đường lối ngoại giao mềm dẻo.",
+        "B. Do Xiêm là nước có tiềm lực mạnh về kinh tế.",
+        "C. Xiêm liên minh quân sự chặt chẽ với nước Mỹ.",
+        "D. Xiêm đã tiến hành cuộc cách mạng tư sản sớm."
+      ],
+      "dap_an_dung": [
+        "*A. Do thực hiện đường lối ngoại giao mềm dẻo."
+      ],
+      "type": "multiple_choice"
+    }
+  ]
+};
+
+        // --- REWARD SYSTEM DATA & LOGIC ---
+        const phrases = {
+            tier1: ["Khá lắm!", "Tốt!", "Chính xác!", "Hay lắm!"],
+            tier2: ["Tuyệt vời!", "Quá đỉnh!", "Phong độ lắm!", "Siêu!"],
+            tier3: ["Không thể tin nổi!", "Bạn là thiên tài!", "Xuất sắc!", "Đỉnh cao!"],
+            tier4: ["THẦN THÁNH!", "VÔ ĐỐI!", "TUYỆT ĐỐI!", "BẤT BẠI!"]
+        };
+
+        const wrongPhrases = {
+            tier1: ["Tiếc quá!", "Suýt đúng!", "Cẩn thận nhé!", "Sai rồi!"], 
+            tier2: ["Đừng nản!", "Bình tĩnh nào!", "Hít thở sâu!", "Cố lên bạn ơi!"], 
+            tier3: ["Thất bại là mẹ thành công!", "Không được bỏ cuộc!", "Vững tin lên!", "Cơ hội vẫn còn!"] 
+        };
+
+        function getRandomPhrase(array) {
+            return array[Math.floor(Math.random() * array.length)];
+        }
+
+        // --- 1. INDEXEDDB HELPER (XỬ LÝ LƯU TRỮ MỚI) ---
+        const dbHelper = {
+            dbName: 'QuizAppDB',
+            storeName: 'history',
+            version: 1,
+            db: null,
+
+            open: function() {
+                return new Promise((resolve, reject) => {
+                    const request = indexedDB.open(this.dbName, this.version);
+                    request.onupgradeneeded = (event) => {
+                        const db = event.target.result;
+                        if (!db.objectStoreNames.contains(this.storeName)) {
+                            db.createObjectStore(this.storeName, { keyPath: 'id' });
+                            console.log("DEBUG: Đã tạo ObjectStore mới cho lịch sử.");
+                        }
+                    };
+                    request.onsuccess = (event) => {
+                        this.db = event.target.result;
+                        console.log("DEBUG: Kết nối IndexedDB thành công.");
+                        this.migrateFromLocalStorage();
+                        resolve(this.db);
+                    };
+                    request.onerror = (event) => {
+                        console.error("DEBUG: Lỗi mở DB:", event.target.error);
+                        reject(event.target.error);
+                    };
+                });
+            },
+            addEntry: function(entry) {
+                return new Promise((resolve, reject) => {
+                    if (!this.db) return reject("DB chưa mở");
+                    const transaction = this.db.transaction([this.storeName], 'readwrite');
+                    const store = transaction.objectStore(this.storeName);
+                    const request = store.add(entry);
+                    request.onsuccess = () => resolve(true);
+                    request.onerror = (e) => reject(e.target.error);
+                });
+            },
+            getAll: function() {
+                return new Promise((resolve, reject) => {
+                    if (!this.db) return reject("DB chưa mở");
+                    const transaction = this.db.transaction([this.storeName], 'readonly');
+                    const store = transaction.objectStore(this.storeName);
+                    const request = store.getAll();
+                    request.onsuccess = () => resolve(request.result);
+                    request.onerror = (e) => reject(e.target.error);
+                });
+            },
+            deleteEntry: function(id) {
+                return new Promise((resolve, reject) => {
+                    if (!this.db) return reject("DB chưa mở");
+                    const transaction = this.db.transaction([this.storeName], 'readwrite');
+                    const store = transaction.objectStore(this.storeName);
+                    const request = store.delete(id);
+                    request.onsuccess = () => resolve(true);
+                    request.onerror = (e) => reject(e.target.error);
+                });
+            },
+            migrateFromLocalStorage: function() {
+                const oldData = localStorage.getItem('quizHistory');
+                if (oldData) {
+                    try {
+                        const history = JSON.parse(oldData);
+                        if (Array.isArray(history) && history.length > 0) {
+                            const transaction = this.db.transaction([this.storeName], 'readwrite');
+                            const store = transaction.objectStore(this.storeName);
+                            history.forEach(item => store.put(item));
+                            transaction.oncomplete = () => localStorage.removeItem('quizHistory');
+                        }
+                    } catch (e) { console.error("DEBUG: Lỗi migration:", e); }
+                }
+            }
+        };
+
+        
+                const backgroundMusic = null;
+                const correctAnswerSound = new Audio('./sounds/correct.mp3');
+                const incorrectAnswerSound = new Audio('./sounds/incorrect.mp3');
+            
+        const ICONS = {
+            volumeOn: '<svg viewBox="0 0 24 24"><path d="M14,3.23V5.29C16.89,6.15 19,8.83 19,12C19,15.17 16.89,17.84 14,18.7V20.77C18,19.86 21,16.28 21,12C21,7.72 18,4.14 14,3.23M16.5,12C16.5,10.23 15.5,8.71 14,7.97V16C15.5,15.29 16.5,13.76 16.5,12M3,9V15H7L12,20V4L7,9H3Z"></path></svg>',
+            volumeOff: '<svg viewBox="0 0 24 24"><path d="M12,4L7,9H3V15H7L12,20V4M14,3.23V5.29C16.89,6.15 19,8.83 19,12C19,13.91 18.1,15.61 16.8,16.8L14,14V7.97C15.5,8.71 16.5,10.23 16.5,12C16.5,12.33 16.44,12.65 16.34,12.94L14.38,10.98L14,10.61V3.23Z M21.46,23.96L19.7,22.2C18.3,23.32 16.55,24 14.75,24C10.75,24 7.15,21.81 4.55,19.21L2.48,17.14L3.9,15.73L21.46,23.96Z"></path></svg>'
+        };
+
+        // Thêm trạng thái combo và wrongCount
+        let appState = { 
+            currentUser: '', playerID: '', currentQuiz: [], quizTopic: '', originalQuizOrder: [], 
+            currentQuestionIndex: 0, score: 0, isShuffled: false, userAnswers: [], trueFalseAnswers: {}, isQuizStarted: false, 
+            quizStartTime: null, currentScreen: null, shuffledQuizMap: [], shuffledOptionsMap: [], 
+            feedbackTimeoutId: null,
+            isMasterMuted: false, isMusicMuted: false, isCorrectSoundMuted: false, isIncorrectSoundMuted: false,
+            isAutoAdvanceEnabled: false,
+            currentModalHistory: null,
+            historySidebarVisible: true,
+            // STATE MỚI
+            combo: 0,
+            wrongCount: 0,
+            borderTimeout: null
+        };
+
+        const pillColorConfig = {
+            baseClasses: 'px-4 py-2 rounded-full text-white font-semibold shadow-md transition-transform transform hover:scale-105',
+            selectedClasses: 'bg-gray-500 hover:bg-gray-600',
+            colors: [
+                { name: 'blue', classes: 'bg-blue-500 hover:bg-blue-600' },
+                { name: 'green', classes: 'bg-green-500 hover:bg-green-600' },
+                { name: 'purple', classes: 'bg-purple-500 hover:bg-purple-600' }
+            ]
+        };
+        let largeSearchMatches = [];
+        let currentMatchIndex = -1;
+        
+        document.addEventListener('DOMContentLoaded', () => { 
+            dbHelper.open().catch(err => alert("Lỗi khởi tạo Database: " + err));
+            initEventListeners(); 
+            initHistoryEventListeners();
+            checkLogin(); 
+        });
+        
+        function checkLogin() { 
+            const savedUser = localStorage.getItem('quizAppUser'); 
+            if (savedUser) { 
+                appState.currentUser = savedUser; 
+                document.getElementById('user-greeting').textContent = `Xin chào, ${appState.currentUser}!`; 
+                showScreen('home-screen'); 
+            } else { 
+                showScreen('login-screen'); 
+            } 
+        }
+        
+        function initEventListeners() {
+            document.getElementById('login-btn').addEventListener('click', () => { 
+                const username = document.getElementById('username-input').value.trim(); 
+                if (username) { 
+                    appState.currentUser = username; 
+                    localStorage.setItem('quizAppUser', username); 
+                    document.getElementById('user-greeting').textContent = `Xin chào, ${appState.currentUser}!`; 
+                    showScreen('home-screen'); 
+                } else { 
+                    alert('Vui lòng nhập tên của bạn.'); 
+                } 
+            });
+            document.getElementById('menu-shuffle-btn').addEventListener('click', toggleShuffle);
+            document.getElementById('menu-start-btn').addEventListener('click', startQuizFromMenu);
+
+            const settingsIcon = document.getElementById('settings-icon-container');
+            const settingsPanel = document.getElementById('settings-panel');
+            const masterVolumeBtn = document.getElementById('master-volume-btn');
+            let isLongPress = false;
+            let pressTimer;
+
+            settingsIcon.addEventListener('click', () => {
+                settingsPanel.style.display = settingsPanel.style.display === 'block' ? 'none' : 'block';
+            });
+
+            const handleMasterVolumeClick = () => {
+                appState.isMasterMuted = !appState.isMasterMuted;
+                appState.isMusicMuted = appState.isMasterMuted;
+                appState.isCorrectSoundMuted = appState.isMasterMuted;
+                appState.isIncorrectSoundMuted = appState.isMasterMuted;
+                syncSettingsUI();
+                controlBackgroundMusic();
+            };
+
+            masterVolumeBtn.addEventListener('mousedown', () => { isLongPress = false; pressTimer = setTimeout(() => { isLongPress = true; document.getElementById('detailed-audio-settings').style.display = 'block'; }, 500); });
+            masterVolumeBtn.addEventListener('mouseup', () => { clearTimeout(pressTimer); if (!isLongPress) handleMasterVolumeClick(); });
+            masterVolumeBtn.addEventListener('touchstart', (e) => { e.preventDefault(); isLongPress = false; pressTimer = setTimeout(() => { isLongPress = true; document.getElementById('detailed-audio-settings').style.display = 'block'; }, 500); });
+            masterVolumeBtn.addEventListener('touchend', (e) => { e.preventDefault(); clearTimeout(pressTimer); if (!isLongPress) handleMasterVolumeClick(); });
+
+            document.getElementById('music-toggle').addEventListener('change', (e) => { appState.isMusicMuted = !e.target.checked; controlBackgroundMusic(); syncSettingsUI(); });
+            document.getElementById('correct-sound-toggle').addEventListener('change', (e) => { appState.isCorrectSoundMuted = !e.target.checked; syncSettingsUI(); });
+            document.getElementById('incorrect-sound-toggle').addEventListener('change', (e) => { appState.isIncorrectSoundMuted = !e.target.checked; syncSettingsUI(); });
+            document.getElementById('auto-advance-toggle').addEventListener('change', (e) => { appState.isAutoAdvanceEnabled = e.target.checked; });
+        }
+
+        function initHistoryEventListeners() {
+             document.getElementById('deleteHistoryBtn').addEventListener('click', deleteHistoryFromModal);
+             document.getElementById('comparison-help-btn').addEventListener('click', () => { document.getElementById('helpModal').style.display = 'block'; });
+             initTouchGestures();
+             initComparisonMenuListeners();
+        }
+
+        function showScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+            appState.currentScreen = screenId;
+            
+            const settingsIcon = document.getElementById('settings-icon-container');
+            if (screenId === 'quiz-section') {
+                settingsIcon.style.display = 'block';
+            } else {
+                settingsIcon.style.display = 'none';
+                document.getElementById('settings-panel').style.display = 'none';
+                rewardSystem.resetEffects(); // Reset effects when leaving quiz
+            }
+            
+            if (screenId === 'history-list-screen') {
+                renderHistoryList();
+            }
+            
+            if (screenId !== 'quiz-section') {
+                document.getElementById('fixed-action-bar').style.display = 'none';
+                document.querySelector('.container').classList.remove('pb-safe');
+                resetEffects(); // Xóa hiệu ứng khi thoát quiz
+            }
+        }
+        
+        function showHistoryScreen() { showScreen('history-list-screen'); }
+
+        function startQuizFromMenu() { 
+            const firstQuizKey = Object.keys(QUIZ_DATA_SETS)[0]; 
+            const quizData = QUIZ_DATA_SETS[firstQuizKey]; 
+            appState.quizTopic = firstQuizKey; 
+            appState.originalQuizOrder = JSON.parse(JSON.stringify(quizData)); 
+            showScreen('quiz-section'); 
+            document.getElementById('quiz-title').textContent = appState.quizTopic; 
+            startQuiz(); 
+        }
+        
+        function startQuiz() {
+            appState.score = 0; appState.currentQuestionIndex = 0; appState.userAnswers = []; appState.trueFalseAnswers = {}; appState.isQuizStarted = true; appState.quizStartTime = Date.now(); appState.shuffledQuizMap = []; appState.shuffledOptionsMap = [];
+            // Reset combo
+            appState.combo = 0;
+            appState.wrongCount = 0;
+            resetEffects();
+            document.getElementById('combo-display').style.display = 'none';
+            
+            const quizData = appState.originalQuizOrder;
+            if (appState.isShuffled) {
+                const shuffleableIndices = quizData.map((q, i) => (q.groupId ? null : i)).filter((i) => i !== null);
+                for (let i = shuffleableIndices.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [shuffleableIndices[i], shuffleableIndices[j]] = [shuffleableIndices[j], shuffleableIndices[i]];
+                }
+                const newTempQuiz = [];
+                const newTempQuizMap = [];
+                let shuffleableIndexPointer = 0;
+                for (let i = 0; i < quizData.length; i++) {
+                    if (quizData[i].groupId) { newTempQuiz[i] = quizData[i]; newTempQuizMap[i] = i; } else {
+                        const originalIndex = shuffleableIndices[shuffleableIndexPointer];
+                        newTempQuiz[i] = quizData[originalIndex];
+                        newTempQuizMap[i] = originalIndex;
+                        shuffleableIndexPointer++;
+                    }
+                }
+                appState.currentQuiz = newTempQuiz.map(q => ({...q}));
+                appState.shuffledQuizMap = newTempQuizMap;
+            } else {
+                appState.currentQuiz = [...quizData];
+                appState.shuffledQuizMap = quizData.map((_, i) => i);
+            }
+            
+            appState.userAnswers = new Array(appState.currentQuiz.length).fill(null);
+            renderProgressBar();
+            updateProgressStats();
+
+            document.getElementById('results-container').style.display = 'none';
+            document.getElementById('quiz-controls').style.display = 'block';
+            document.getElementById('submit-early-btn').style.display = 'inline-block';
+            document.getElementById('exit-btn').style.display = 'inline-block';
+            
+            document.getElementById('fixed-action-bar').style.display = 'flex';
+            document.querySelector('.container').classList.add('pb-safe');
+            
+            syncSettingsUI(); 
+            controlBackgroundMusic();
+            displayQuestion();
+        }
+
+        function retryWrongQuestions() {
+            const currentQList = appState.currentQuiz;
+            const userAns = appState.userAnswers;
+            
+            const wrongQuestions = currentQList.filter((q, index) => {
+                const answerEntry = userAns[index];
+                return !answerEntry || !answerEntry.isCorrect;
+            });
+
+            if (wrongQuestions.length === 0) {
+                alert("Chúc mừng! Bạn đã làm đúng tất cả, không có câu sai để làm lại.");
+                return;
+            }
+
+            appState.currentQuiz = wrongQuestions.map(q => ({...q})); 
+            appState.score = 0;
+            appState.currentQuestionIndex = 0;
+            appState.userAnswers = new Array(appState.currentQuiz.length).fill(null);
+            appState.trueFalseAnswers = {};
+            appState.shuffledOptionsMap = []; 
+            
+            // Reset combo
+            appState.combo = 0;
+            appState.wrongCount = 0;
+            resetEffects();
+            document.getElementById('combo-display').style.display = 'none';
+
+            if (appState.isShuffled) {
+                appState.shuffledQuizMap = appState.currentQuiz.map((_, i) => i); 
+            }
+
+            appState.isQuizStarted = true;
+            
+            document.getElementById('results-container').style.display = 'none';
+            document.getElementById('quiz-controls').style.display = 'block';
+            document.getElementById('submit-early-btn').style.display = 'inline-block';
+            document.getElementById('exit-btn').style.display = 'inline-block';
+            
+            renderProgressBar();
+            updateProgressStats();
+            document.getElementById('fixed-action-bar').style.display = 'flex';
+            document.querySelector('.container').classList.add('pb-safe');
+
+            displayQuestion();
+        }
+
+        function syncSettingsUI() {
+            document.getElementById('master-volume-btn').innerHTML = appState.isMasterMuted ? ICONS.volumeOff : ICONS.volumeOn;
+            document.getElementById('music-toggle').checked = !appState.isMusicMuted;
+            document.getElementById('correct-sound-toggle').checked = !appState.isCorrectSoundMuted;
+            document.getElementById('incorrect-sound-toggle').checked = !appState.isIncorrectSoundMuted;
+            document.getElementById('auto-advance-toggle').checked = appState.isAutoAdvanceEnabled;
+        }
+
+        function controlBackgroundMusic() {
+            if (!backgroundMusic) return;
+            if (appState.isQuizStarted && !appState.isMasterMuted && !appState.isMusicMuted) {
+                backgroundMusic.loop = true;
+                backgroundMusic.play().catch(e => console.log("Lỗi phát nhạc nền:", e));
+            } else {
+                backgroundMusic.pause();
+                backgroundMusic.currentTime = 0;
+            }
+        }
+
+        function renderProgressBar() {
+            const barContainer = document.getElementById('progress-bar-visual');
+            barContainer.innerHTML = '';
+            const total = appState.currentQuiz.length;
+            for (let i = 0; i < total; i++) {
+                const segment = document.createElement('div');
+                segment.className = 'progress-segment';
+                segment.id = `prog-seg-${i}`;
+                barContainer.appendChild(segment);
+            }
+        }
+
+        function updateProgressBar() {
+            appState.userAnswers.forEach((ans, index) => {
+                if (ans) {
+                    const seg = document.getElementById(`prog-seg-${index}`);
+                    if (seg) {
+                        seg.className = 'progress-segment ' + (ans.isCorrect ? 'correct' : 'incorrect');
+                    }
+                }
+            });
+            const total = appState.currentQuiz.length;
+            for (let i = 0; i < total; i++) {
+                const seg = document.getElementById(`prog-seg-${i}`);
+                if (seg) {
+                    if (i === appState.currentQuestionIndex) seg.classList.add('active'); else seg.classList.remove('active');
+                }
+            }
+            updateProgressStats();
+        }
+
+        function updateProgressStats() {
+            const total = appState.currentQuiz.length;
+            let correct = 0; 
+            let incorrect = 0;
+
+            appState.userAnswers.forEach(ans => { 
+                if (ans) { 
+                    if (ans.isCorrect) correct++; else incorrect++; 
+                } 
+            });
+
+            const correctPercent = total > 0 ? Math.round((correct / total) * 100) : 0;
+            const incorrectPercent = total > 0 ? Math.round((incorrect / total) * 100) : 0;
+
+            document.getElementById('stat-correct-ratio').textContent = `${correct}/${total}`;
+            document.getElementById('stat-correct-percent').textContent = `${correctPercent}%`;
+            
+            document.getElementById('stat-incorrect-ratio').textContent = `${incorrect}/${total}`;
+            document.getElementById('stat-incorrect-percent').textContent = `${incorrectPercent}%`;
+        }
+
+        // --- HÀM XỬ LÝ HIỆU ỨNG REWARD ---
+        function resetEffects() {
+            clearTimeout(appState.borderTimeout);
+            const container = document.getElementById('main-container');
+            container.classList.remove('border-correct', 'border-wrong');
+            // Xóa hiệu ứng rung
+            container.style.animation = 'none';
+            container.offsetHeight; /* trigger reflow */
+            container.style.animation = null; 
+        }
+
+        function triggerRewardEffect(isCorrect) {
+            resetEffects();
+            const container = document.getElementById('main-container');
+            const comboBadge = document.getElementById('combo-display');
+            let message = "";
+            let color = "";
+            let isRainbow = false;
+
+            if (isCorrect) {
+                appState.combo++;
+                appState.wrongCount = 0;
+                
+                // Hiệu ứng viền
+                container.classList.add('border-correct');
+                appState.borderTimeout = setTimeout(() => {
+                    container.classList.remove('border-correct');
+                }, 600);
+
+                // Logic pháo hoa và lời khen
+                if (appState.combo <= 2) {
+                    message = getRandomPhrase(phrases.tier1);
+                    color = "#43a047"; 
+                    confetti({ particleCount: 30, spread: 50, origin: { y: 0.8 }, colors: ['#43a047', '#81c784'] });
+                } else if (appState.combo <= 5) {
+                    message = getRandomPhrase(phrases.tier2);
+                    color = "#d81b60";
+                    confetti({ particleCount: 60, spread: 70, origin: { y: 0.8 }, colors: ['#d81b60', '#f48fb1'] });
+                } else if (appState.combo <= 8) {
+                    message = getRandomPhrase(phrases.tier3);
+                    color = "#ef6c00";
+                    confetti({ particleCount: 100, spread: 90, origin: { y: 0.8 }, colors: ['#ef6c00', '#ffcc80'] });
+                } else {
+                    message = getRandomPhrase(phrases.tier4);
+                    isRainbow = true;
+                    confetti({ particleCount: 150, spread: 120, origin: { y: 0.8 }, colors: ['#d32f2f', '#1976d2', '#388e3c', '#fbc02d'] });
+                }
+            } else {
+                appState.combo = 0;
+                appState.wrongCount++;
+                confetti.reset(); // Xóa pháo hoa
+
+                // Hiệu ứng rung và viền đỏ
+                container.classList.add('border-wrong');
+                appState.borderTimeout = setTimeout(() => {
+                    container.classList.remove('border-wrong');
+                }, 500);
+
+                // Logic động viên
+                if (appState.wrongCount <= 2) {
+                    message = getRandomPhrase(wrongPhrases.tier1);
+                } else if (appState.wrongCount <= 5) {
+                    message = getRandomPhrase(wrongPhrases.tier2);
+                } else {
+                    message = getRandomPhrase(wrongPhrases.tier3);
+                }
+                color = "#c62828";
+            }
+
+            // Cập nhật Badge Combo
+            if (appState.combo > 1) {
+                comboBadge.style.display = 'inline-block';
+                comboBadge.innerText = `COMBO x${appState.combo}`;
+                comboBadge.classList.add('pulse');
+                setTimeout(() => comboBadge.classList.remove('pulse'), 200);
+            } else {
+                comboBadge.style.display = 'none';
+            }
+
+            return { message, color, isRainbow };
+        }
+        
+        function displayQuestion() {
+            const container = document.getElementById('quiz-live-container');
+            if (appState.currentQuestionIndex >= appState.currentQuiz.length) { showResults(); return; }
+            updateProgressBar();
+            resetEffects(); // Đảm bảo hiệu ứng cũ không còn
+
+            const q = appState.currentQuiz[appState.currentQuestionIndex];
+            
+            let passageHTML = '';
+            if (q.passage) {
+                let passageText = q.passage;
+                const qNumMatch = q.cau_hoi.match(/^Câu\s*(\d+)/);
+                if (qNumMatch) {
+                    const qNum = qNumMatch[1];
+                    const titleRegex = new RegExp(`^Câu\\s*${qNum}\\s*[:.]*\\s*`, 'i');
+                    passageText = passageText.replace(titleRegex, '');
+                }
+                passageHTML = `<div style="padding: 12px; margin-bottom: 16px; border: 1px solid #ddd; border-radius: 8px; background-color: #f9f9f9; max-height: 200px; overflow-y: auto;">${parseContentWithMedia(passageText)}</div>`;
+            }
+
+            let questionHTML = `<div class="question-container" id="q-${appState.currentQuestionIndex}">${passageHTML}<p class="question-text">${parseContentWithMedia(q.cau_hoi)}</p><div class="options-container">`;
+            let optionsToDisplay = [...q.lua_chon];
+            
+            if (appState.isShuffled && ['multiple_choice', 'multiple_answer', 'true_false'].includes(q.type)) {
+                if (!appState.shuffledOptionsMap[appState.currentQuestionIndex]) {
+                    let optionIndices = Array.from({length: optionsToDisplay.length}, (_, i) => i);
+                    for (let i = optionIndices.length - 1; i > 0; i--) {
+                        const j = Math.floor(Math.random() * (i + 1));
+                        [optionIndices[i], optionIndices[j]] = [optionIndices[j], optionIndices[i]];
+                    }
+                    appState.shuffledOptionsMap[appState.currentQuestionIndex] = optionIndices;
+                }
+                optionsToDisplay = appState.shuffledOptionsMap[appState.currentQuestionIndex].map(i => q.lua_chon[i]);
+            } else {
+                if (!appState.shuffledOptionsMap[appState.currentQuestionIndex]) {
+                     appState.shuffledOptionsMap[appState.currentQuestionIndex] = Array.from({length: optionsToDisplay.length}, (_, i) => i);
+                }
+            }
+
+            if (q.type === 'short_answer') {
+                questionHTML += `<input type="text" id="short-answer-input-${appState.currentQuestionIndex}" class="short-answer-input" placeholder="Nhập đáp án của bạn...">`;
+            } else if (q.type === 'true_false') {
+                optionsToDisplay.forEach((option, index) => {
+                    const originalIndex = appState.isShuffled ? appState.shuffledOptionsMap[appState.currentQuestionIndex][index] : index;
+                    questionHTML += `<div class="tf-option"><div class="tf-statement">${parseContentWithMedia(option.replace(/^\s*\*?\s*[A-Za-z]{1,2}[.)]/, '').trim())}</div><div class="tf-buttons"><button class="tf-btn" onclick="toggleTrueFalse(this, '${appState.currentQuestionIndex}', '${originalIndex}')">Chọn</button></div></div>`;
+                });
+            } else {
+                const inputType = q.type === 'multiple_answer' ? 'checkbox' : 'radio';
+                optionsToDisplay.forEach(c => {
+                    questionHTML += `<label><input type="${inputType}" name="option-${appState.currentQuestionIndex}" value="${escapeHtml(c)}" class="mr-2"> ${parseContentWithMedia(c.replace(/^\s*\*?\s*[A-Za-z]{1,2}[.)]/, '').trim())}</label>`;
+                });
+            }
+            
+            questionHTML += `</div><div class="feedback"></div></div>`;
+            container.innerHTML = questionHTML;
+            
+            const actionBtn = document.getElementById('fixed-action-btn');
+            actionBtn.textContent = 'Trả Lời';
+            actionBtn.onclick = checkAnswer;
+            actionBtn.className = 'btn'; 
+            actionBtn.disabled = false;
+
+            if (typeof katex !== 'undefined') renderMathInElement(container, {delimiters: [{left: "$$", right: "$$", display: true}, {left: "$", right: "$", display: false}]});
+        }
+
+        function toggleTrueFalse(buttonEl, qIndex, optionIndex) {
+            qIndex = parseInt(qIndex); optionIndex = parseInt(optionIndex);
+            if (!appState.trueFalseAnswers[qIndex]) { appState.trueFalseAnswers[qIndex] = {}; }
+            const currentChoice = appState.trueFalseAnswers[qIndex][optionIndex];
+            let newChoice = (currentChoice === undefined) ? true : (currentChoice === true ? false : undefined);
+            if (newChoice === undefined) { delete appState.trueFalseAnswers[qIndex][optionIndex]; } else { appState.trueFalseAnswers[qIndex][optionIndex] = newChoice; }
+            buttonEl.classList.remove('selected-true', 'selected-false');
+            if (newChoice === true) { buttonEl.textContent = 'Đúng'; buttonEl.classList.add('selected-true'); } else if (newChoice === false) { buttonEl.textContent = 'Sai'; buttonEl.classList.add('selected-false'); } else { buttonEl.textContent = 'Chọn'; }
+        }
+
+        function checkAnswer() {
+            const q = appState.currentQuiz[appState.currentQuestionIndex];
+            const container = document.getElementById(`q-${appState.currentQuestionIndex}`);
+            const feedbackDiv = container.querySelector('.feedback');
+            const optionPrefixRegex = /^\s*\*?\s*[A-Za-z]{1,2}[.)]/;
+            let isCorrect = false;
+            let selectedAnswerForHistory = [];
+
+            const actionBtn = document.getElementById('fixed-action-btn');
+            actionBtn.textContent = 'Câu Tiếp Theo';
+            actionBtn.onclick = skipToNextQuestion;
+            actionBtn.className = 'btn btn-success';
+            
+            if (q.type === 'short_answer') {
+                const userInputField = container.querySelector(`#short-answer-input-${appState.currentQuestionIndex}`);
+                const userAnswer = userInputField.value.trim();
+                userInputField.disabled = true;
+                isCorrect = q.dap_an_dung.some(ans => ans.trim().toLowerCase() === userAnswer.toLowerCase());
+                selectedAnswerForHistory = [userAnswer];
+            } else if (q.type === 'true_false') {
+                 const userSelections = appState.trueFalseAnswers[appState.currentQuestionIndex] || {};
+                 let allCorrect = true;
+                 if (Object.keys(userSelections).length !== q.lua_chon.length) { allCorrect = false; } else {
+                    for(let i = 0; i < q.lua_chon.length; i++) {
+                        const isStatementActuallyCorrect = q.lua_chon[i].trim().startsWith('*');
+                        if (userSelections[i] !== isStatementActuallyCorrect) { allCorrect = false; break; }
+                    }
+                 }
+                 isCorrect = allCorrect;
+                 selectedAnswerForHistory = isCorrect ? ["Trả lời đúng toàn bộ"] : ["Trả lời sai"];
+
+                const optionsOnScreen = container.querySelectorAll('.tf-option');
+                optionsOnScreen.forEach((optionDiv, screenIndex) => {
+                    let originalIndex = appState.isShuffled ? appState.shuffledOptionsMap[appState.currentQuestionIndex][screenIndex] : screenIndex;
+                    const isStatementActuallyCorrect = q.lua_chon[originalIndex].trim().startsWith('*');
+                    const userChoice = userSelections[originalIndex];
+                    
+                    if (isStatementActuallyCorrect) { 
+                        optionDiv.style.borderColor = 'var(--success-color)'; 
+                        optionDiv.style.backgroundColor = '#d4edda';
+                        optionDiv.style.color = '#155724';
+                    } else { 
+                        optionDiv.style.borderColor = 'var(--danger-color)'; 
+                        optionDiv.style.backgroundColor = '#f8d7da';
+                        optionDiv.style.color = '#721c24';
+                    }
+                    
+                    const button = optionDiv.querySelector('.tf-btn');
+                    button.disabled = true;
+                    button.classList.remove('selected-true', 'selected-false'); 
+                    
+                    if (userChoice === true) { 
+                        button.textContent = 'Đúng'; 
+                        button.classList.add('selected-true'); 
+                    } else if (userChoice === false) { 
+                        button.textContent = 'Sai'; 
+                        button.classList.add('selected-false'); 
+                    } else {
+                        button.textContent = '---';
+                        button.style.opacity = '0.5';
+                    }
+                });
+            } else {
+                const getCleanContent = text => text.replace(optionPrefixRegex, '').trim();
+                const checkedInputs = Array.from(container.querySelectorAll('input:checked'));
+                let selected = checkedInputs.map(el => el.value);
+                selectedAnswerForHistory = selected;
+                container.querySelectorAll('input').forEach(el => el.disabled = true);
+                const cleanCorrectAnswers = q.dap_an_dung.map(getCleanContent);
+                const cleanSelectedContents = selected.map(getCleanContent);
+                isCorrect = cleanSelectedContents.length === cleanCorrectAnswers.length && cleanSelectedContents.sort().every((val, index) => val === cleanCorrectAnswers.sort()[index]);
+                
+                container.querySelectorAll('label').forEach(label => {
+                    const input = label.querySelector('input');
+                    label.style.border = '1px solid #ddd'; // Reset
+                    
+                    const isCorrectAnswer = q.dap_an_dung.some(correct_ans => getCleanContent(correct_ans) === getCleanContent(input.value));
+                    
+                    if (isCorrectAnswer) { 
+                        label.style.backgroundColor = '#d4edda'; 
+                        label.style.borderColor = 'var(--success-color)';
+                        label.style.color = '#155724';
+                    } else { 
+                        if (input.checked) {
+                             label.style.backgroundColor = '#f8d7da'; 
+                             label.style.borderColor = 'var(--danger-color)';
+                             label.style.color = '#721c24';
+                        }
+                    }
+                });
+            }
+
+            appState.userAnswers[appState.currentQuestionIndex] = {
+                questionIndex: appState.currentQuestionIndex,
+                selected: selectedAnswerForHistory,
+                isCorrect: isCorrect
+            };
+            updateProgressBar();
+
+            // --- GỌI LOGIC THƯỞNG/PHẠT ---
+            const rewardData = triggerRewardEffect(isCorrect);
+            // ------------------------------
+
+            if (isCorrect) {
+                appState.score++;
+                if (!appState.isMasterMuted && !appState.isCorrectSoundMuted && correctAnswerSound) correctAnswerSound.play().catch(e => {});
+            } else {
+                if (!appState.isMasterMuted && !appState.isIncorrectSoundMuted && incorrectAnswerSound) incorrectAnswerSound.play().catch(e => {});
+            }
+            
+            // Hiển thị lời khen/động viên
+            let rewardHTML = `<div class="reward-message ${rewardData.isRainbow ? 'rainbow-text' : ''}" style="color: ${rewardData.color}">${rewardData.message}</div>`;
+            
+            feedbackDiv.innerHTML = `${rewardHTML}<strong style="color: ${isCorrect ? 'var(--success-color)' : 'var(--danger-color)'};">${isCorrect ? 'Đúng' : 'Sai'}!</strong>`;
+            if (!isCorrect && q.type !== 'true_false') {
+                const correctAnswersHTML = q.dap_an_dung.map(ans => parseContentWithMedia(ans.replace(/^\*/, ''))).join('; ');
+                feedbackDiv.innerHTML += `<p>Đáp án đúng: <span style="color: var(--success-color);">${correctAnswersHTML}</span></p>`;
+            }
+
+            if (appState.isAutoAdvanceEnabled) {
+                appState.feedbackTimeoutId = setTimeout(nextQuestion, 2000);
+            }
+        }
+
+        function skipToNextQuestion() { if (appState.feedbackTimeoutId) { clearTimeout(appState.feedbackTimeoutId); appState.feedbackTimeoutId = null; } nextQuestion(); }
+        function nextQuestion() { if (appState.feedbackTimeoutId) { clearTimeout(appState.feedbackTimeoutId); appState.feedbackTimeoutId = null; } appState.currentQuestionIndex++; displayQuestion(); }
+        function submitEarly() { if (confirm('Bạn có chắc muốn nộp bài sớm không?')) { showResults(); } }
+        
+        async function showResults() {
+            appState.isQuizStarted = false;
+            controlBackgroundMusic();
+            document.getElementById('quiz-live-container').innerHTML = '';
+            
+            document.getElementById('quiz-controls').style.display = 'none';
+
+            const resultsContainer = document.getElementById('results-container');
+            resultsContainer.style.display = 'block';
+            
+            const total = appState.currentQuiz.length;
+            document.getElementById('final-score').innerHTML = `Bạn đã đúng <strong style="color: var(--success-color);">${appState.score} / ${total}</strong> câu!`;
+            
+            const wrongCount = total - appState.score;
+            const retryWrongBtn = document.getElementById('retry-wrong-btn');
+            
+            if (wrongCount === 0) {
+                retryWrongBtn.style.opacity = "0.5";
+                retryWrongBtn.innerText = "Không có câu sai";
+            } else {
+                retryWrongBtn.style.opacity = "1";
+                retryWrongBtn.innerText = `Làm lại ${wrongCount} câu sai`;
+            }
+            
+            document.getElementById('fixed-action-bar').style.display = 'none';
+            document.querySelector('.container').classList.remove('pb-safe');
+            
+            if (appState.currentQuiz.length === appState.originalQuizOrder.length) {
+                await saveHistory();
+            }
+        }
+        
+        async function saveHistory() {
+            const historyEntry = {
+                id: Date.now(),
+                user: appState.currentUser,
+                date: new Date().toLocaleString('vi-VN'),
+                score: appState.score,
+                total: appState.currentQuiz.length,
+                quizTopic: appState.quizTopic,
+                isShuffled: appState.isShuffled,
+                quiz: appState.originalQuizOrder, 
+                shuffledQuizMap: appState.shuffledQuizMap,
+                shuffledOptionsMap: appState.shuffledOptionsMap,
+                answers: appState.userAnswers.filter(a => a)
+            };
+            
+            try {
+                await dbHelper.addEntry(historyEntry);
+                console.log("DEBUG: Đã lưu lịch sử vào IndexedDB");
+            } catch (error) {
+                alert("CẢNH BÁO: Không thể lưu lịch sử làm bài! Lỗi: " + error.message);
+                console.error("Critical Error Saving History:", error);
+            }
+        }
+
+        async function renderHistoryList() {
+            const container = document.getElementById('history-list');
+            container.innerHTML = '<p class="text-gray-500 p-2">Đang tải dữ liệu...</p>';
+            try {
+                let history = await dbHelper.getAll();
+                history.sort((a, b) => b.id - a.id);
+                container.innerHTML = ''; 
+                if (history.length === 0) {
+                    container.innerHTML = '<p class="text-gray-500 p-2">Chưa có lịch sử làm bài.</p>';
+                    return;
+                }
+                history.forEach((entry, index) => {
+                    const colorInfo = pillColorConfig.colors[index % pillColorConfig.colors.length];
+                    const btn = document.createElement('button');
+                    btn.dataset.id = entry.id;
+                    btn.dataset.color = colorInfo.name;
+                    const userDisplay = entry.user ? `[${entry.user}] ` : '';
+                    btn.textContent = `${userDisplay}${entry.date} (${entry.score}/${entry.total})`;
+                    btn.className = `${pillColorConfig.baseClasses} ${colorInfo.classes}`;
+                    btn.onclick = () => {
+                        const wasSelected = btn.classList.contains('bg-gray-500');
+                        container.querySelectorAll('button').forEach(b => {
+                            const originalColorName = b.dataset.color;
+                            const originalColorInfo = pillColorConfig.colors.find(c => c.name === originalColorName);
+                            if(originalColorInfo) b.className = `${pillColorConfig.baseClasses} ${originalColorInfo.classes}`;
+                        });
+                        const questionBox = document.getElementById('history-questionBox');
+                        questionBox.innerHTML = '';
+                        questionBox.classList.add("hidden");
+                        if (!wasSelected) {
+                            btn.className = `${pillColorConfig.baseClasses} ${pillColorConfig.selectedClasses}`;
+                            const div = document.createElement("div");
+                            div.className = "p-3 border rounded bg-gray-50";
+                            let content = `<p class="font-bold">Kết quả ${entry.user ? entry.user : ''} ngày ${entry.date} (Điểm: ${entry.score}/${entry.total})</p>
+                                           <button class="btn text-sm p-2 mt-2" onclick="showHistoryContent(${entry.id})">Xem Chi Tiết</button>`;
+                            if (entry.isShuffled) {
+                                content += `<button class="btn text-sm p-2 mt-2 ml-2" onclick="showComparison(${entry.id})">Xem so sánh</button>`;
+                            }
+                            content += `<button class="btn btn-warning text-sm p-2 mt-2 ml-2" onclick="showStatistics(${entry.id})">Thống kê</button>`;
+                            div.innerHTML = content;
+                            questionBox.appendChild(div);
+                            questionBox.classList.remove("hidden");
+                        }
+                    };
+                    container.appendChild(btn);
+                });
+            } catch (err) {
+                container.innerHTML = `<p class="text-red-500 p-2">Lỗi tải lịch sử: ${err.message}</p>`;
+                console.error(err);
+            }
+        }
+
+        async function showHistoryContent(hid) {
+            try {
+                let history = await dbHelper.getAll();
+                const entry = history.find(e => e.id == hid);
+                if (!entry) return;
+                
+                appState.currentModalHistory = entry;
+                const modal = document.getElementById('history-contentModal');
+                document.getElementById('history-modalTitle').textContent = `Lịch sử làm bài: ${entry.date}`;
+                const modalContent = document.getElementById('history-modalContent');
+                modalContent.innerHTML = `<h4>Điểm: ${entry.score}/${entry.total}</h4>`;
+                
+                const quizData = entry.isShuffled ? entry.shuffledQuizMap.map(i => entry.quiz[i]) : entry.quiz;
+                
+                quizData.forEach((q, index) => {
+                    const userAnswerEntry = entry.answers.find(a => a.questionIndex === index) || { selected: [], isCorrect: false };
+                    let contentHTML = `<div style="margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #eee;"><p><strong>Câu ${index + 1}:</strong> ${parseContentWithMedia(q.cau_hoi)}</p>`;
+                    const originalQuestionIndex = entry.isShuffled ? entry.shuffledQuizMap[index] : index;
+                    const correctAnswers = entry.quiz[originalQuestionIndex].dap_an_dung;
+
+                    if (q.lua_chon && q.lua_chon.length > 0) {
+                        const optionPrefixRegex = /^\s*\*?\s*[A-Za-z]{1,2}[.)]/;
+                        const getCleanContent = (text) => text ? text.replace(optionPrefixRegex, '').replace(/^\*/, '').trim() : '';
+                        contentHTML += '<ul>' + q.lua_chon.map(c => {
+                            const isAnswerKey = correctAnswers.some(ans => getCleanContent(ans) === getCleanContent(c));
+                            const isSelected = userAnswerEntry.selected.some(sel => getCleanContent(sel) === getCleanContent(c));
+                            let style = '';
+                            if (isSelected) { style = isAnswerKey ? 'color: var(--success-color); font-weight: bold;' : 'color: var(--danger-color);'; } 
+                            else if (isAnswerKey) { style = 'color: var(--success-color); text-decoration: underline;'; }
+                            return `<li style="${style}">${c}</li>`;
+                        }).join('') + '</ul>';
+                    }
+                    contentHTML += `<p>Câu trả lời của bạn: <strong>${userAnswerEntry.selected.join(', ') || 'Chưa trả lời'}</strong> - <strong style="color:${userAnswerEntry.isCorrect ? 'var(--success-color)' : 'var(--danger-color)'};">${userAnswerEntry.isCorrect ? 'Đúng' : 'Sai'}</strong></p>`;
+                    if (!userAnswerEntry.isCorrect) { contentHTML += `<p style="color: var(--success-color);"><em>Đáp án đúng: ${correctAnswers.join(', ')}</em></p>`; }
+                    modalContent.innerHTML += contentHTML + '</div>';
+                });
+                modal.style.display = 'block';
+            } catch (e) { alert("Lỗi hiển thị chi tiết: " + e); }
+        }
+
+        async function showStatistics(hid) {
+            try {
+                let history = await dbHelper.getAll();
+                const entry = history.find(e => e.id == hid);
+                if (!entry) return;
+                const modal = document.getElementById('statisticsModal');
+                const modalTitle = document.getElementById('statistics-modalTitle');
+                const legendContent = document.getElementById('statistics-legend');
+                const correctCount = entry.score;
+                const answeredCount = entry.answers.length;
+                const incorrectCount = answeredCount - correctCount;
+                const unansweredCount = entry.total - answeredCount;
+                const correctPercentage = entry.total > 0 ? ((correctCount / entry.total) * 100).toFixed(1) : 0;
+                modalTitle.textContent = `Thống kê: ${entry.date}`;
+                legendContent.innerHTML = `<p><strong>Kết quả:</strong> <span style="color:var(--success-color)">${correctCount} Đúng</span> / <span style="color:var(--danger-color)">${incorrectCount} Sai</span> / <span style="color:var(--secondary-color)">${unansweredCount} Chưa làm</span></p><p><strong>Tỉ lệ đúng:</strong> ${correctPercentage}%</p>`;
+                const chartEl = document.querySelector("#statistics-chart");
+                if(window.statisticsChart) { window.statisticsChart.destroy(); }
+                const options = { chart: { type: 'pie', height: 320 }, series: [correctCount, incorrectCount, unansweredCount], labels: ['Đúng', 'Sai', 'Chưa làm'], colors: ['#28a745', '#dc3545', '#6c757d'], legend: { position: 'bottom' } };
+                window.statisticsChart = new ApexCharts(chartEl, options);
+                window.statisticsChart.render();
+                modal.style.display = 'block';
+                document.getElementById('statistics-close-btn').onclick = () => { modal.style.display = 'none'; };
+            } catch (e) { alert("Lỗi thống kê: " + e); }
+        }
+
+        async function showComparison(hid) {
+            try {
+                let history = await dbHelper.getAll();
+                const entry = history.find(e => e.id == hid);
+                if (!entry || !entry.isShuffled) { alert("Bài này không được xáo trộn."); return; }
+                const modal = document.getElementById('comparisonModal');
+                const comparisonContainer = document.getElementById('comparison-content');
+                const fragment = document.createDocumentFragment();
+                const lightColors = ['#D4EDDA', '#FFF3CD', '#D1ECF1', '#F8D7DA', '#E2E3E5', '#CCE5FF'];
+
+                entry.shuffledQuizMap.forEach((originalIndex, shuffledIndex) => {
+                    const originalQ = entry.quiz[originalIndex];
+                    const userAnswerEntry = entry.answers.find(a => a.questionIndex === shuffledIndex);
+                    const questionBlock = document.createElement('div');
+                    questionBlock.className = 'comparison-question';
+                    questionBlock.id = `comp-q-shuffled-${shuffledIndex + 1}`;
+                    questionBlock.dataset.originalIndex = originalIndex + 1;
+                    
+                    let questionBlockHTML = `<h4 style="text-align:center; color: #0056b3; font-weight: bold;">Câu gốc ${originalIndex + 1} &rArr; Câu xáo trộn ${shuffledIndex + 1}</h4>
+                        <p class="comparison-question-text">${parseContentWithMedia(originalQ.cau_hoi)}</p>`;
+
+                    if (originalQ.type === 'short_answer') {
+                        const correctAnswer = originalQ.dap_an_dung.join(', ');
+                        let userAnswerHTML = '<em>(Chưa trả lời)</em>';
+                        if (userAnswerEntry && userAnswerEntry.selected.length > 0 && userAnswerEntry.selected[0]) {
+                            const userAnswer = userAnswerEntry.selected[0];
+                            const userAnswerColor = userAnswerEntry.isCorrect ? 'var(--success-color)' : 'var(--danger-color)';
+                            userAnswerHTML = `<strong style="color: ${userAnswerColor};">${userAnswer}</strong>`;
+                        }
+                        questionBlockHTML += `<div style="text-align:center; padding:10px; background-color:#f0f0f0; border-radius:8px;"><p>Đáp án đúng: <strong style="color: var(--success-color);">${correctAnswer}</strong></p><p>Bạn đã trả lời: ${userAnswerHTML}</p></div>`;
+                    } else {
+                        questionBlockHTML += `<div class="options-comparison-wrapper">`;
+                        questionBlockHTML += `<div class="options-column"><h5>Đề gốc</h5>`;
+                        originalQ.lua_chon.forEach((opt, idx) => {
+                            const isCorrect = originalQ.dap_an_dung.includes(opt);
+                            const style = isCorrect ? 'color: var(--success-color); font-weight: bold;' : 'color: var(--text-color);';
+                            const color = lightColors[idx % lightColors.length];
+                            questionBlockHTML += `<div class="option-item" style="background-color: ${color};"><span style="${style}">${opt}</span></div>`;
+                        });
+                        questionBlockHTML += `</div>`;
+                        questionBlockHTML += `<div class="options-column"><h5>Đề đảo</h5>`;
+                        const shuffledContentIndices = entry.shuffledOptionsMap[shuffledIndex] || [];
+                        const userSelectedOptions = userAnswerEntry ? userAnswerEntry.selected : [];
+                        const optionPrefixRegex = /^\s*\*?\s*[A-Za-z]{1,2}[.)]/;
+                        const getCleanContent = (text) => text.replace(optionPrefixRegex, '').replace(/\*/g, '').trim();
+
+                        if (Array.isArray(originalQ.lua_chon) && originalQ.lua_chon.length > 0) {
+                            if (shuffledContentIndices.length > 0) {
+                                const originalLabels = originalQ.lua_chon.map(opt => (opt.match(optionPrefixRegex) || [''])[0]);
+                                const originalContents = originalQ.lua_chon.map(opt => getCleanContent(opt));
+                                originalLabels.forEach((label, newIndex) => {
+                                    const originalContentIndex = shuffledContentIndices[newIndex];
+                                    if (originalContentIndex === undefined) return; 
+                                    const originalOptionString = originalQ.lua_chon[originalContentIndex];
+                                    const fullShuffledOption = label + originalContents[originalContentIndex]; 
+                                    const isThisOptionCorrect = originalQ.dap_an_dung.includes(originalOptionString);
+                                    const wasThisOptionSelected = userSelectedOptions.includes(fullShuffledOption);
+                                    const color = lightColors[originalContentIndex % lightColors.length];
+                                    let finalStyle = '';
+                                    if (wasThisOptionSelected) { finalStyle = isThisOptionCorrect ? 'color: var(--success-color); font-weight: bold;' : 'color: var(--danger-color);'; } 
+                                    else if (isThisOptionCorrect) { finalStyle = 'color: var(--success-color); text-decoration: underline;'; }
+                                    questionBlockHTML += `<div class="option-item" style="background-color: ${color};"><span style="${finalStyle}">${fullShuffledOption}</span></div>`;
+                                });
+                            } else {
+                                originalQ.lua_chon.forEach((opt, idx) => {
+                                    const isThisOptionCorrect = originalQ.dap_an_dung.includes(opt);
+                                    const wasThisOptionSelected = userSelectedOptions.includes(opt);
+                                    let finalStyle = wasThisOptionSelected ? (isThisOptionCorrect ? 'color:var(--success-color);font-weight:bold;' : 'color:var(--danger-color);') : (isThisOptionCorrect ? 'color:var(--success-color);text-decoration:underline;' : '');
+                                    questionBlockHTML += `<div class="option-item"><span style="${finalStyle}">${opt}</span></div>`;
+                                });
+                            }
+                        }
+                        questionBlockHTML += `</div></div>`;
+                    }
+                    questionBlock.innerHTML = questionBlockHTML;
+                    fragment.appendChild(questionBlock);
+                });
+                comparisonContainer.innerHTML = '';
+                comparisonContainer.appendChild(fragment);
+                document.getElementById('comparison-modalTitle').textContent = `So sánh: ${entry.date}`;
+                modal.style.display = 'block';
+                document.getElementById('comparison-menu-btn').style.display = 'flex';
+                document.getElementById('comparison-help-btn').style.display = 'flex';
+            } catch (e) { alert("Lỗi hiển thị so sánh: " + e); }
+        }
+
+        function closeHistoryModal() { document.getElementById('history-contentModal').style.display = 'none'; }
+        
+        async function deleteHistoryFromModal() { 
+            if(appState.currentModalHistory && confirm("Bạn có chắc muốn xóa?")) { 
+                try {
+                    await dbHelper.deleteEntry(appState.currentModalHistory.id);
+                    closeHistoryModal();
+                    renderHistoryList();
+                    document.getElementById('history-questionBox').classList.add('hidden');
+                } catch (e) {
+                    alert("Lỗi khi xóa: " + e);
+                }
+            }
+        }
+        function closeComparisonModal() {
+            document.getElementById('comparisonModal').style.display = 'none';
+            document.getElementById('comparison-menu-btn').style.display = 'none';
+            document.getElementById('comparison-help-btn').style.display = 'none'; 
+            document.getElementById('helpModal').style.display = 'none'; 
+            closeAllMenus();
+            clearLargeSearch();
+        }
+
+        function initTouchGestures() {
+            const historySidebar = document.getElementById('history-sidebar');
+            const historyMainContent = document.getElementById('history-mainContent');
+            let startX = 0;
+            document.addEventListener("touchstart", (e) => { startX = e.touches[0].clientX; });
+            document.addEventListener("touchend", (e) => {
+                const endX = e.changedTouches[0].clientX;
+                const diff = endX - startX;
+                if (diff < -50 && appState.historySidebarVisible) {
+                     historySidebar.style.transform = "translateX(-100%)";
+                     historyMainContent.classList.remove("with-sidebar");
+                     historyMainContent.classList.add("full");
+                     appState.historySidebarVisible = false;
+                }
+                if (diff > 50 && !appState.historySidebarVisible) {
+                    historySidebar.style.transform = "translateX(0)";
+                    historyMainContent.classList.remove("full");
+                    historyMainContent.classList.add("with-sidebar");
+                    appState.historySidebarVisible = true;
+                }
+            });
+        }
+
+        function initComparisonMenuListeners() {
+            const menuBtn = document.getElementById('comparison-menu-btn');
+            const smallMenu = document.getElementById('small-search-menu');
+            const largeMenu = document.getElementById('large-search-menu');
+            const modalContent = document.getElementById('comparisonModalContent');
+            let pressTimer = null;
+            const startPress = (e) => { if(e.cancelable) e.preventDefault(); pressTimer = setTimeout(() => { closeAllMenus(); largeMenu.classList.add('open'); modalContent.classList.add('large-search-open'); pressTimer = null; }, 500); };
+            const endPress = (e) => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; if (largeMenu.classList.contains('open')) { closeAllMenus(); } else { smallMenu.classList.toggle('open'); } } };
+            menuBtn.addEventListener('mousedown', startPress); menuBtn.addEventListener('mouseup', endPress); menuBtn.addEventListener('mouseleave', () => { if(pressTimer) clearTimeout(pressTimer); });
+            menuBtn.addEventListener('touchstart', startPress, { passive: false }); menuBtn.addEventListener('touchend', endPress);
+            document.getElementById('clear-small-search').addEventListener('click', () => { document.getElementById('dao-input').value = ''; document.getElementById('thuan-input').value = ''; });
+            document.getElementById('exec-small-search').addEventListener('click', execSmallSearch);
+            document.getElementById('clear-large-search').addEventListener('click', () => { document.getElementById('large-search-input').value = ''; clearLargeSearch(); });
+            document.getElementById('exec-large-search').addEventListener('click', execLargeSearch);
+            document.getElementById('prev-match-btn').addEventListener('click', () => navigateMatches(-1));
+            document.getElementById('next-match-btn').addEventListener('click', () => navigateMatches(1));
+        }
+
+        function closeAllMenus() {
+            document.getElementById('small-search-menu').classList.remove('open');
+            const largeMenu = document.getElementById('large-search-menu');
+            if (largeMenu.classList.contains('open')) {
+                largeMenu.classList.remove('open');
+                document.getElementById('comparisonModalContent').classList.remove('large-search-open');
+            }
+        }
+
+        function execSmallSearch() {
+            const daoInput = document.getElementById('dao-input');
+            const thuanInput = document.getElementById('thuan-input');
+            const daoValue = daoInput.value;
+            const thuanValue = thuanInput.value;
+            let targetElement = null;
+            if (daoValue) { targetElement = document.getElementById(`comp-q-shuffled-${daoValue}`); } 
+            else if (thuanValue) { targetElement = document.querySelector(`.comparison-question[data-original-index='${thuanValue}']`); }
+            if (targetElement) {
+                targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                targetElement.style.transition = 'background-color 0.5s';
+                targetElement.style.backgroundColor = 'rgba(255, 255, 0, 0.3)';
+                setTimeout(() => { targetElement.style.backgroundColor = ''; }, 1500);
+            } else { if(daoValue || thuanValue) alert('Không tìm thấy câu hỏi này!'); }
+        }
+
+        function clearLargeSearch() {
+            document.getElementById('large-search-results').textContent = '';
+            document.getElementById('prev-match-btn').style.display = 'none';
+            document.getElementById('next-match-btn').style.display = 'none';
+            largeSearchMatches.forEach(match => { if (match.element) { match.element.innerHTML = match.originalHTML; } });
+            largeSearchMatches = [];
+            currentMatchIndex = -1;
+        }
+
+        function execLargeSearch() {
+            const searchText = document.getElementById('large-search-input').value.trim();
+            const resultsDiv = document.getElementById('large-search-results');
+            clearLargeSearch();
+            if (searchText.length < 2) { resultsDiv.textContent = 'Vui lòng nhập ít nhất 2 ký tự.'; return; }
+            const regex = new RegExp(searchText.replace(/[-/\^$*+?.()|[\]{}]/g, '\\$&'), 'gi');
+            const allQuestionBlocks = document.querySelectorAll('.comparison-question');
+            let totalMatchCount = 0;
+            allQuestionBlocks.forEach(qBlock => {
+                if (qBlock.textContent.toLowerCase().includes(searchText.toLowerCase())) {
+                    const originalHTML = qBlock.innerHTML;
+                    const newHTML = qBlock.innerHTML.replace(regex, (match) => `<mark>${match}</mark>`);
+                    if(newHTML !== originalHTML) {
+                        largeSearchMatches.push({ element: qBlock, originalHTML: originalHTML });
+                        qBlock.innerHTML = newHTML;
+                        totalMatchCount += (qBlock.textContent.match(regex) || []).length;
+                    }
+                }
+            });
+            if (largeSearchMatches.length > 0) {
+                resultsDiv.textContent = `Tìm thấy ${totalMatchCount} kết quả.`;
+                document.getElementById('prev-match-btn').style.display = 'inline-block';
+                document.getElementById('next-match-btn').style.display = 'inline-block';
+                currentMatchIndex = 0;
+                scrollToMatch(currentMatchIndex);
+            } else {
+                resultsDiv.textContent = 'Không tìm thấy kết quả nào.';
+            }
+        }
+
+        function navigateMatches(direction) {
+            if (largeSearchMatches.length === 0) return;
+            const newIndex = currentMatchIndex + direction;
+            if (newIndex >= 0 && newIndex < largeSearchMatches.length) {
+                largeSearchMatches[currentMatchIndex].element.querySelector('mark')?.classList.remove('current-match');
+                currentMatchIndex = newIndex;
+                scrollToMatch(currentMatchIndex);
+            }
+        }
+
+        function scrollToMatch(index) {
+            const targetElement = largeSearchMatches[index].element;
+            const firstMarkInElement = targetElement.querySelector('mark');
+            if (firstMarkInElement) {
+                document.querySelectorAll('mark.current-match').forEach(m => m.classList.remove('current-match'));
+                firstMarkInElement.classList.add('current-match');
+            }
+            targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        
+        function toggleShuffle() {
+            appState.isShuffled = !appState.isShuffled;
+            document.getElementById('menu-shuffle-btn').textContent = `Trộn câu hỏi và đáp án: ${appState.isShuffled ? 'Bật' : 'Tắt'}`;
+        }
+        
+        function escapeHtml(text) {
+            if (typeof text !== 'string') return '';
+            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+        
+        function parseContentWithMedia(text) {
+            if (typeof text !== 'string' || !text) return '';
+            let rawHtml = escapeHtml(text).replace(/\n/g, '<br />');
+            rawHtml = rawHtml.replace(/#\{([^}]+?)\}#/g, (match, content) => {
+                const cleanedContent = content.trim();
+                if (cleanedContent.startsWith('res/')) { return `<img src="${cleanedContent}" alt="Image" class="question-image">`; }
+                const base64Regex = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+                if (base64Regex.test(cleanedContent.replace(/\s/g, ''))) { return `<img src="data:image/png;base64,${cleanedContent}" alt="Image" class="question-image">`; }
+                return match;
+            });
+            if (typeof katex !== 'undefined') {
+                rawHtml = rawHtml.replace(/\$\$([\s\S]+?)\$\$/g, (m, f) => { try { return katex.renderToString(f, {displayMode: true}); } catch(e){ return m; }});
+                rawHtml = rawHtml.replace(/\$([\s\S]+?)\$/g, (m, f) => { if(m.startsWith('$')||m.endsWith('$')) return m; try { return katex.renderToString(f, {displayMode: false}); } catch(e){ return m; }});
+            }
+            return typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml, { ADD_TAGS: ['img'], ADD_ATTR: ['src', 'alt', 'style', 'class'] }) : rawHtml;
+        }
+    </script>
+</body>
+</html>
